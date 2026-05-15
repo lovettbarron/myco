@@ -32,12 +32,13 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can close a panel and open new panels of placeholder type
   4. User can fullscreen a panel and return to the grid layout
   5. The application is a signed and notarized macOS .app that installs without Gatekeeper warnings
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Renderable window with single themed panel (wgpu + winit + taffy + glyphon scaffold)
-- [ ] 01-02-PLAN.md -- Grid interactions (split, resize, close, swap, fullscreen with input routing)
-- [ ] 01-03-PLAN.md -- Build pipeline (cargo-packager + rcodesign signing + notarization)
+- [ ] 01-01-PLAN.md -- Core scaffold and GPU state (Cargo project, wgpu pipeline, winit window, custom title bar)
+- [ ] 01-02-PLAN.md -- Renderers, grid layout, and platform (quad renderer, text renderer, taffy grid, panel model)
+- [ ] 01-03-PLAN.md -- Grid interactions (split, resize, close, swap, fullscreen with input routing)
+- [ ] 01-04-PLAN.md -- Build pipeline (cargo-packager + rcodesign signing + notarization)
 
 ### Phase 2: Terminal Cap
 **Goal**: User can run shell commands in a GPU-rendered terminal inside the workspace grid
@@ -131,7 +132,7 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Window, Grid, and Build Pipeline | 0/3 | Planning complete | - |
+| 1. Window, Grid, and Build Pipeline | 0/4 | Planning complete | - |
 | 2. Terminal Cap | 0/2 | Not started | - |
 | 3. Webview Caps | 0/2 | Not started | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |

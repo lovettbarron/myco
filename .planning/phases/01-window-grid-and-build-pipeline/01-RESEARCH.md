@@ -918,27 +918,31 @@ rcodesign notary-submit \
 | A4 | Traffic light button repositioning via `setFrameOrigin` persists across window resize events | Pattern 5 (macOS Custom Title Bar) | May need to re-apply positioning in a resize handler or use Auto Layout constraints via objc2. |
 | A5 | taffy's `grid` feature flag is required for `Display::Grid` to work | Pitfall 5 | LOW risk -- well documented, but must not be forgotten in Cargo.toml. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **rcodesign certificate format**
    - What we know: The developer has a "Developer ID Application" signing identity in Keychain (confirmed via `security find-identity`). rcodesign accepts PEM files.
    - What's unclear: How to export the Keychain certificate to PEM format for rcodesign, or whether rcodesign can use Keychain directly.
    - Recommendation: Test `rcodesign sign` with `--keychain-domain user` flag first (documented in rcodesign help). If that fails, export via Keychain Access as .p12 and convert.
+   - RESOLVED: Use `--keychain-domain user` as the primary approach in scripts/package.sh. PEM export is documented as a fallback in Plan 01-04, Task 1 action. The script also documents a third fallback using native `codesign` CLI.
 
 2. **App Store Connect API Key**
    - What we know: Notarization requires an API key encoded as JSON via `rcodesign encode-app-store-connect-api-key`.
    - What's unclear: Whether the developer already has an App Store Connect API key created.
    - Recommendation: Create API key at https://appstoreconnect.apple.com/access/api during build pipeline setup. Store the JSON file at `~/.appstoreconnect/key.json`.
+   - RESOLVED: Required for notarization. Documented in Plan 01-04 user_setup section with step-by-step instructions for API key creation and encoding. The packaging script gracefully skips notarization if the key file is not present, with a helpful warning message.
 
 3. **D-05 proportional resize across all panels in a row/column**
    - What we know: taffy CSS Grid uses `fr()` fractional units and recomputes on demand. Changing track definitions via `set_style()` is supported.
    - What's unclear: The exact algorithm for redistributing `fr()` values when a divider moves, ensuring all panels in the track resize proportionally.
    - Recommendation: Implement as: when divider at position `p` in track with N panels moves by `delta`, scale all `fr()` values on each side of the divider proportionally. Test with 3+ panels in a row.
+   - RESOLVED: Proportional redistribution algorithm specified in Plan 01-03, Task 1 action (`apply_divider_drag`): convert delta to fraction of total track size, scale all fr() values on each side of the divider proportionally, clamp to PANEL_MIN_SIZE. Unit test `test_proportional_resize` verifies with 3-column layout.
 
 4. **Traffic light positioning stability**
    - What we know: `standardWindowButton()` returns `NSButton` views that can be repositioned.
    - What's unclear: Whether repositioning is stable across macOS window lifecycle events (resize, fullscreen, minimize/restore).
    - Recommendation: Apply positioning in both `resumed()` and after window resize. May need a `did_resize` observer via objc2.
+   - RESOLVED: Apply positioning in both `resumed()` and after window resize events. Plans 01-01 and 01-02 specify re-applying traffic light positioning. If positioning still drifts, a `did_resize` NSNotification observer can be added via objc2 as a follow-up.
 
 ## Environment Availability
 
