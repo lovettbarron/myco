@@ -21,7 +21,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Grid Layout
 
-- [ ] **GRID-01**: User can arrange multiple panels (caps) in a resizable grid within the workspace
+- [x] **GRID-01**: User can arrange multiple panels (caps) in a resizable grid within the workspace
 - [ ] **GRID-02**: User can drag panel dividers to resize panels smoothly
 - [ ] **GRID-03**: User can close any panel with a close button or keyboard shortcut
 - [ ] **GRID-04**: User can open new panels (caps) of any available type
@@ -135,7 +135,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GRID-01 | Phase 1 | Pending |
+| GRID-01 | Phase 1 | Complete |
 | GRID-02 | Phase 1 | Pending |
 | GRID-03 | Phase 1 | Pending |
 | GRID-04 | Phase 1 | Pending |

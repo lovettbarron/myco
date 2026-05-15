@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 1 context gathered
-last_updated: "2026-05-15T20:23:40.796Z"
-last_activity: 2026-05-15 -- Phase 01 planning complete
+last_updated: "2026-05-15T20:33:37.704Z"
+last_activity: 2026-05-15
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 25
 ---
 
 # Project State
@@ -21,35 +21,35 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** The project folder is the persistent AI context surface -- sketch, code, and document in one workspace where everything saves to the folder and everything is readable by AI agents.
-**Current focus:** Phase 1: Window, Grid, and Build Pipeline
+**Current focus:** Phase 01 — window-grid-and-build-pipeline
 
 ## Current Position
 
-Phase: 1 of 6 (Window, Grid, and Build Pipeline)
-Plan: 0 of 2 in current phase
+Phase: 01 (window-grid-and-build-pipeline) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 01 planning complete
+Last activity: 2026-05-15
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 1
+- Average duration: 6 minutes
+- Total execution time: 0.1 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01 | 1/4 | 6m | 6m |
 
 **Recent Trend:**
 
-- Last 5 plans: -
-- Trend: -
+- Last 5 plans: 01-01 (6m)
+- Trend: baseline
 
 *Updated after each plan completion*
 
@@ -63,6 +63,9 @@ Recent decisions affecting current work:
 - [Roadmap]: Rust + wgpu + alacritty_terminal + wry hybrid architecture confirmed by research (MEDIUM-HIGH confidence)
 - [Roadmap]: macOS code signing and notarization validated in Phase 1 (research recommends day-1 validation)
 - [Roadmap]: Phase 4 (Frame/Theming) depends only on Phase 1, enabling potential parallel execution with Phases 2-3
+- [01-01]: wgpu 29.0.3 uses CurrentSurfaceTexture enum (not old SurfaceError) -- render loop adapted
+- [01-01]: winit 0.30.13 stable uses inner_size naming (not surface_size from 0.31 beta)
+- [01-01]: AppKitWindowHandle exposes ns_view only -- get NSWindow via NSView::window()
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T19:31:16.617Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-window-grid-and-build-pipeline/01-CONTEXT.md
+Last session: 2026-05-15T20:33:37.698Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: .planning/phases/01-window-grid-and-build-pipeline/01-02-PLAN.md
