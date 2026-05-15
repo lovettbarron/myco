@@ -1,7 +1,7 @@
 # Requirements: Myco
 
 **Defined:** 2026-05-15
-**Core Value:** The project folder is the persistent AI context surface — sketch, code, and document in one workspace where everything saves to the folder and everything is readable by AI agents.
+**Core Value:** The project folder is the persistent AI context surface -- sketch, code, and document in one workspace where everything saves to the folder and everything is readable by AI agents.
 
 ## v1 Requirements
 
@@ -135,13 +135,52 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| | | |
+| GRID-01 | Phase 1 | Pending |
+| GRID-02 | Phase 1 | Pending |
+| GRID-03 | Phase 1 | Pending |
+| GRID-04 | Phase 1 | Pending |
+| GRID-05 | Phase 1 | Pending |
+| GRID-06 | Phase 1 | Pending |
+| DIST-01 | Phase 1 | Pending |
+| DIST-02 | Phase 1 | Pending |
+| TERM-01 | Phase 2 | Pending |
+| TERM-02 | Phase 2 | Pending |
+| TERM-03 | Phase 2 | Pending |
+| TERM-04 | Phase 2 | Pending |
+| TERM-05 | Phase 2 | Pending |
+| TERM-06 | Phase 2 | Pending |
+| TERM-07 | Phase 2 | Pending |
+| TERM-08 | Phase 2 | Pending |
+| TERM-09 | Phase 2 | Pending |
+| CAP-01 | Phase 3 | Pending |
+| CAP-02 | Phase 3 | Pending |
+| CAP-03 | Phase 3 | Pending |
+| CAP-04 | Phase 3 | Pending |
+| FRAME-01 | Phase 4 | Pending |
+| FRAME-02 | Phase 4 | Pending |
+| FRAME-03 | Phase 4 | Pending |
+| FRAME-04 | Phase 4 | Pending |
+| FRAME-05 | Phase 4 | Pending |
+| THEME-01 | Phase 4 | Pending |
+| THEME-02 | Phase 4 | Pending |
+| THEME-03 | Phase 4 | Pending |
+| CFG-01 | Phase 5 | Pending |
+| CFG-02 | Phase 5 | Pending |
+| CFG-03 | Phase 5 | Pending |
+| CFG-04 | Phase 5 | Pending |
+| CFG-05 | Phase 5 | Pending |
+| KEY-01 | Phase 5 | Pending |
+| KEY-02 | Phase 5 | Pending |
+| KEY-03 | Phase 5 | Pending |
+| AI-01 | Phase 6 | Pending |
+| AI-02 | Phase 6 | Pending |
+| AI-03 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 35 total
-- Mapped to phases: 0
-- Unmapped: 35
+- v1 requirements: 40 total
+- Mapped to phases: 40
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-15*
-*Last updated: 2026-05-15 after initial definition*
+*Last updated: 2026-05-15 after roadmap creation*

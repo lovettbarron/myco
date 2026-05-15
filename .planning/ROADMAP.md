@@ -1,0 +1,138 @@
+# Roadmap: Myco
+
+## Overview
+
+Myco is an AI-native project control surface: a GPU-rendered workspace where terminal, canvas, and document panels share a project folder as the source of truth. The roadmap delivers this in six vertical phases -- each producing a more capable, usable application. Phase 1 builds the renderable window and grid skeleton with signing infrastructure. Phase 2 puts a working terminal inside that grid. Phase 3 adds webview caps (TLDraw, Markdown) to prove the hybrid GPU+webview thesis. Phase 4 wraps the workspace in application chrome and theming. Phase 5 makes the workspace persistent across sessions. Phase 6 adds AI-native monitoring and polish for v1 ship.
+
+## Phases
+
+**Phase Numbering:**
+- Integer phases (1, 2, 3): Planned milestone work
+- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+
+Decimal phases appear between their surrounding integers in numeric order.
+
+- [ ] **Phase 1: Window, Grid, and Build Pipeline** - Renderable window with resizable grid panels and signed macOS app bundle
+- [ ] **Phase 2: Terminal Cap** - Fully functional terminal emulator in a grid cell
+- [ ] **Phase 3: Webview Caps** - TLDraw canvas and Markdown viewer via embedded webviews
+- [ ] **Phase 4: Application Frame and Theming** - Navigation bars, status bars, settings, and theme system
+- [ ] **Phase 5: Configuration and Persistence** - Project config, global config, layout save/restore, keyboard shortcuts
+- [ ] **Phase 6: AI Monitoring and Ship** - Process monitoring, intervention toasts, and v1 distribution readiness
+
+## Phase Details
+
+### Phase 1: Window, Grid, and Build Pipeline
+**Goal**: User can see and interact with a resizable grid of panels in a signed macOS application
+**Mode:** mvp
+**Depends on**: Nothing (first phase)
+**Requirements**: GRID-01, GRID-02, GRID-03, GRID-04, GRID-05, GRID-06, DIST-01, DIST-02
+**Success Criteria** (what must be TRUE):
+  1. User can launch the application and see a window with multiple colored panel cells arranged in a grid
+  2. User can drag dividers between panels and see them resize smoothly
+  3. User can close a panel and open new panels of placeholder type
+  4. User can fullscreen a panel and return to the grid layout
+  5. The application is a signed and notarized macOS .app that installs without Gatekeeper warnings
+**Plans**: TBD
+
+Plans:
+- [ ] 01-01: TBD
+- [ ] 01-02: TBD
+
+### Phase 2: Terminal Cap
+**Goal**: User can run shell commands in a GPU-rendered terminal inside the workspace grid
+**Mode:** mvp
+**Depends on**: Phase 1
+**Requirements**: TERM-01, TERM-02, TERM-03, TERM-04, TERM-05, TERM-06, TERM-07, TERM-08, TERM-09
+**Success Criteria** (what must be TRUE):
+  1. User can open a terminal panel and run interactive shell commands (bash, zsh, fish) with full PTY support
+  2. User can view true color output (24-bit) from tools like bat, vim, and neovim with correct color rendering
+  3. User can scroll back through terminal history and search within scrollback with highlighted matches
+  4. User can copy/paste text with Cmd+C/V, select text via mouse (line and rectangular), and configure font and size
+  5. Terminal correctly renders Unicode text including CJK characters and supports cursor style switching via escape sequences
+**Plans**: TBD
+
+Plans:
+- [ ] 02-01: TBD
+- [ ] 02-02: TBD
+
+### Phase 3: Webview Caps
+**Goal**: User can sketch on a canvas and view documents alongside the terminal in the same window
+**Mode:** mvp
+**Depends on**: Phase 2
+**Requirements**: CAP-01, CAP-02, CAP-03, CAP-04
+**Success Criteria** (what must be TRUE):
+  1. User can open a TLDraw canvas panel and draw, with the canvas state automatically saved as a .tldr file in the project folder
+  2. User can open a Markdown viewer panel that renders .md files with Obsidian-flavored formatting
+  3. Markdown viewer updates live when the underlying file changes on disk
+  4. User can have terminal, canvas, and markdown panels open simultaneously with correct keyboard focus routing between GPU and webview panels
+**Plans**: TBD
+**UI hint**: yes
+
+Plans:
+- [ ] 03-01: TBD
+- [ ] 03-02: TBD
+
+### Phase 4: Application Frame and Theming
+**Goal**: User sees a complete application shell with navigation, status information, and visual themes
+**Mode:** mvp
+**Depends on**: Phase 1
+**Requirements**: FRAME-01, FRAME-02, FRAME-03, FRAME-04, FRAME-05, THEME-01, THEME-02, THEME-03
+**Success Criteria** (what must be TRUE):
+  1. User sees a left navigation bar for cross-project switching, a top bar with placeholder statistics, and a bottom bar with in-project information
+  2. User can open settings via Cmd+, and configure theme, fonts, keyboard shortcuts, and project preferences
+  3. User can switch between Solarized and Obsidian minimalist themes, with the change applying immediately across all panels
+  4. User can create custom color schemes via the theme configuration system
+**Plans**: TBD
+**UI hint**: yes
+
+Plans:
+- [ ] 04-01: TBD
+- [ ] 04-02: TBD
+
+### Phase 5: Configuration and Persistence
+**Goal**: User's workspace layout and preferences survive application restarts and work across projects
+**Mode:** mvp
+**Depends on**: Phase 3, Phase 4
+**Requirements**: CFG-01, CFG-02, CFG-03, CFG-04, CFG-05, KEY-01, KEY-02, KEY-03
+**Success Criteria** (what must be TRUE):
+  1. User opens a project and the last saved layout (panel arrangement, cap types, sizes) restores automatically from the .myco config file
+  2. User's global preferences and project registry are stored in ~/.myco/ and available across all projects
+  3. The .myco project config file is safe to commit to git (no secrets, no machine-specific paths)
+  4. User can navigate between panels, create/close caps, and perform common actions via Warp-inspired keyboard shortcuts that are customizable in settings
+  5. Standard macOS keyboard shortcuts (Cmd+C, Cmd+V, Cmd+Q, Cmd+W, Cmd+,) work correctly throughout the application
+**Plans**: TBD
+**UI hint**: yes
+
+Plans:
+- [ ] 05-01: TBD
+- [ ] 05-02: TBD
+
+### Phase 6: AI Monitoring and Ship
+**Goal**: User can monitor panel resource usage, receive intervention alerts, and install Myco as a polished macOS application
+**Mode:** mvp
+**Depends on**: Phase 5
+**Requirements**: AI-01, AI-02, AI-03
+**Success Criteria** (what must be TRUE):
+  1. Each panel displays its process resource usage (CPU, RAM) in the panel header
+  2. User can freeze a panel that is consuming too many resources, stopping its process without closing the panel
+  3. Application surfaces toast notifications when a terminal process requires human intervention (e.g., Claude Code permission requests)
+**Plans**: TBD
+**UI hint**: yes
+
+Plans:
+- [ ] 06-01: TBD
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 if resources allow.
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Window, Grid, and Build Pipeline | 0/2 | Not started | - |
+| 2. Terminal Cap | 0/2 | Not started | - |
+| 3. Webview Caps | 0/2 | Not started | - |
+| 4. Application Frame and Theming | 0/2 | Not started | - |
+| 5. Configuration and Persistence | 0/2 | Not started | - |
+| 6. AI Monitoring and Ship | 0/1 | Not started | - |
