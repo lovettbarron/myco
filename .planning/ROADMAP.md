@@ -55,7 +55,7 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 02-01-PLAN.md -- Working terminal core (PTY lifecycle, GPU character rendering, keyboard input, cursor)
+- [x] 02-01-PLAN.md -- Working terminal core (PTY lifecycle, GPU character rendering, keyboard input, cursor)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 02-02-PLAN.md -- Terminal interaction (scrollback, selection, clipboard, search overlay, font config)
@@ -136,7 +136,7 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Window, Grid, and Build Pipeline | 0/4 | Planning complete | - |
-| 2. Terminal Cap | 0/2 | Planning complete | - |
+| 2. Terminal Cap | 1/2 | In Progress|  |
 | 3. Webview Caps | 0/2 | Not started | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |
 | 5. Configuration and Persistence | 0/2 | Not started | - |

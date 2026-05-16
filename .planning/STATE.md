@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-05-16T05:42:40.431Z"
+last_updated: "2026-05-16T06:04:12.646Z"
 last_activity: 2026-05-16 -- Phase 2 planning complete
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 5
+  percent: 83
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** The project folder is the persistent AI context surface -- sketch, code, and document in one workspace where everything saves to the folder and everything is readable by AI agents.
-**Current focus:** Phase 01 — window-grid-and-build-pipeline
+**Current focus:** Phase 02 — terminal-cap
 
 ## Current Position
 
 Phase: 2
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-16 -- Phase 2 planning complete
+Plan: 1 of 2 complete
+Status: Executing
+Last activity: 2026-05-16 -- Completed 02-01 (Working Terminal Core)
 
-Progress: [████████░░] 75%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [████████░░] 75%
 *Updated after each plan completion*
 | Phase 01 P02 | 7 min | 2 tasks | 8 files |
 | Phase 01 P03 | 13 | 2 tasks | 9 files |
+| Phase 02 P01 | 45 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,11 @@ Recent decisions affecting current work:
 - [Phase ?]: [01-03]: PanelSwapDrop carries both source and target IDs in action (avoids reading stale drag state)
 - [Phase ?]: cargo-packager uses flat TOML schema
 - [Phase ?]: rcodesign requires --keychain-fingerprint for cert selection
+- [02-01]: alacritty_terminal::sync::FairMutex required (not parking_lot) -- EventLoop owns the wrapper type
+- [02-01]: PTY via tty::new + EventLoop, WindowSize struct (u16 fields) for resize
+- [02-01]: cosmic-text accessed via glyphon::cosmic_text re-export, not direct dependency
+- [02-01]: Snapshot pattern: lock Term briefly, copy cells, build GPU data without lock
+- [02-01]: TermMode::empty() for keyboard translation -- full mode reading deferred to 02-02
 
 ### Pending Todos
 
@@ -96,6 +102,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T04:36:30.811Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-terminal-cap/02-CONTEXT.md
+Last session: 2026-05-16T06:22:04Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: .planning/phases/02-terminal-cap/02-02-PLAN.md
