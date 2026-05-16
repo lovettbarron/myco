@@ -37,7 +37,7 @@ use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_WIDTH};
 use crate::sidebar::renderer::SidebarRenderer;
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
-use crate::theme::Theme;
+use crate::theme::{Theme, linear_to_srgb_u8};
 use crate::watcher::FileWatcher;
 use crate::window::create_window;
 
@@ -200,6 +200,8 @@ pub struct App {
     menu_state: Option<crate::platform::menu::MenuState>,
     /// Path of the file/dir targeted by the sidebar context menu.
     context_menu_target: Option<std::path::PathBuf>,
+    /// Accumulated sub-line pixel scroll delta for smooth trackpad scrolling.
+    scroll_pixel_accumulator: f64,
 }
 
 impl App {
@@ -235,6 +237,7 @@ impl App {
             #[cfg(target_os = "macos")]
             menu_state: None,
             context_menu_target: None,
+            scroll_pixel_accumulator: 0.0,
         }
     }
 }
@@ -1770,10 +1773,10 @@ impl App {
             height: TITLE_BAR_HEIGHT,
             font_size: 13.0,
             color: glyphon::Color::rgba(
-                (self.theme.title_bar_text[0] * 255.0) as u8,
-                (self.theme.title_bar_text[1] * 255.0) as u8,
-                (self.theme.title_bar_text[2] * 255.0) as u8,
-                (self.theme.title_bar_text[3] * 255.0) as u8,
+                linear_to_srgb_u8(self.theme.title_bar_text[0]),
+                linear_to_srgb_u8(self.theme.title_bar_text[1]),
+                linear_to_srgb_u8(self.theme.title_bar_text[2]),
+                linear_to_srgb_u8(self.theme.title_bar_text[3]),
             ),
         });
 
@@ -1799,10 +1802,10 @@ impl App {
                     height: 20.0,
                     font_size: 12.0,
                     color: glyphon::Color::rgba(
-                        (self.theme.title_bar_text[0] * 255.0) as u8,
-                        (self.theme.title_bar_text[1] * 255.0) as u8,
-                        (self.theme.title_bar_text[2] * 255.0) as u8,
-                        (self.theme.title_bar_text[3] * 255.0) as u8,
+                        linear_to_srgb_u8(self.theme.title_bar_text[0]),
+                        linear_to_srgb_u8(self.theme.title_bar_text[1]),
+                        linear_to_srgb_u8(self.theme.title_bar_text[2]),
+                        linear_to_srgb_u8(self.theme.title_bar_text[3]),
                     ),
                 });
 
@@ -1814,7 +1817,7 @@ impl App {
                     width: 16.0,
                     height: 16.0,
                     font_size: 11.0,
-                    color: glyphon::Color::rgba(200, 200, 200, 255),
+                    color: glyphon::Color::rgba(248, 248, 242, 255),
                 });
 
                 // Fullscreen button label
@@ -1825,7 +1828,7 @@ impl App {
                     width: 16.0,
                     height: 16.0,
                     font_size: 11.0,
-                    color: glyphon::Color::rgba(200, 200, 200, 255),
+                    color: glyphon::Color::rgba(248, 248, 242, 255),
                 });
 
                 // Terminal panels: show "Process exited" if shell exited (D-03)
@@ -1847,10 +1850,10 @@ impl App {
                                     height: 28.0,
                                     font_size: 14.0,
                                     color: glyphon::Color::rgba(
-                                        (self.theme.panel_label_text[0] * 255.0) as u8,
-                                        (self.theme.panel_label_text[1] * 255.0) as u8,
-                                        (self.theme.panel_label_text[2] * 255.0) as u8,
-                                        (self.theme.panel_label_text[3] * 255.0) as u8,
+                                        linear_to_srgb_u8(self.theme.panel_label_text[0]),
+                                        linear_to_srgb_u8(self.theme.panel_label_text[1]),
+                                        linear_to_srgb_u8(self.theme.panel_label_text[2]),
+                                        linear_to_srgb_u8(self.theme.panel_label_text[3]),
                                     ),
                                 });
                             }
@@ -1867,7 +1870,7 @@ impl App {
                                     width: indicator_w - 20.0,
                                     height: 16.0,
                                     font_size: 11.0,
-                                    color: glyphon::Color::rgba(240, 240, 240, 255),
+                                    color: glyphon::Color::rgba(248, 248, 242, 255),
                                 });
                             }
                             // Search overlay labels (D-09)
@@ -1891,7 +1894,7 @@ impl App {
                                     width: bar_width - 80.0,
                                     height: 16.0,
                                     font_size: 12.0,
-                                    color: glyphon::Color::rgba(220, 220, 220, 255),
+                                    color: glyphon::Color::rgba(248, 248, 242, 255),
                                 });
 
                                 // Match count "N of M"
@@ -1906,7 +1909,7 @@ impl App {
                                         height: 16.0,
                                         font_size: 11.0,
                                         color: glyphon::Color::rgba(
-                                            160, 160, 160, 255,
+                                            139, 147, 164, 255,
                                         ),
                                     });
                                 }
@@ -1939,7 +1942,7 @@ impl App {
                                         width: pw - (ghost_x - px),
                                         height: ts.cell_height,
                                         font_size: ts.font_size,
-                                        color: glyphon::Color::rgba(120, 120, 140, 180),
+                                        color: glyphon::Color::rgba(98, 114, 164, 140),
                                     });
                                 }
                             }
@@ -1968,9 +1971,9 @@ impl App {
                                     height: 16.0,
                                     font_size: 13.0,
                                     color: if query.is_empty() {
-                                        glyphon::Color::rgba(120, 120, 130, 255)
+                                        glyphon::Color::rgba(98, 114, 164, 255)
                                     } else {
-                                        glyphon::Color::rgba(220, 220, 230, 255)
+                                        glyphon::Color::rgba(248, 248, 242, 255)
                                     },
                                 });
 
@@ -1990,7 +1993,7 @@ impl App {
                                         height: 16.0,
                                         font_size: 12.0,
                                         color: glyphon::Color::rgba(
-                                            200, 200, 210, 255,
+                                            248, 248, 242, 255,
                                         ),
                                     });
                                 }
@@ -2009,10 +2012,10 @@ impl App {
                         height: 28.0,
                         font_size: 14.0,
                         color: glyphon::Color::rgba(
-                            (self.theme.panel_label_text[0] * 255.0) as u8,
-                            (self.theme.panel_label_text[1] * 255.0) as u8,
-                            (self.theme.panel_label_text[2] * 255.0) as u8,
-                            (self.theme.panel_label_text[3] * 255.0) as u8,
+                            linear_to_srgb_u8(self.theme.panel_label_text[0]),
+                            linear_to_srgb_u8(self.theme.panel_label_text[1]),
+                            linear_to_srgb_u8(self.theme.panel_label_text[2]),
+                            linear_to_srgb_u8(self.theme.panel_label_text[3]),
                         ),
                     });
                 }
@@ -2025,8 +2028,8 @@ impl App {
             let dialog_h = 140.0;
             let dialog_x = (width - dialog_w) / 2.0;
             let dialog_y = (height - dialog_h) / 2.0;
-            let text_color = glyphon::Color::rgba(220, 220, 224, 255);
-            let dim_color = glyphon::Color::rgba(140, 140, 150, 255);
+            let text_color = glyphon::Color::rgba(248, 248, 242, 255);
+            let dim_color = glyphon::Color::rgba(98, 114, 164, 255);
 
             labels.push(TextLabel {
                 text: "Initialize project?".to_string(),
@@ -2407,11 +2410,23 @@ impl ApplicationHandler<UserEvent> for App {
                     // scrolling, positive y means "scroll down" (content moves up),
                     // but positive delta to TerminalScroll means "scroll up/back".
                     let lines = match delta {
-                        winit::event::MouseScrollDelta::LineDelta(_, y) => -(y * 3.0) as i32,
-                        winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as i32,
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => {
+                            self.scroll_pixel_accumulator = 0.0;
+                            -(y * 3.0) as i32
+                        }
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                            self.scroll_pixel_accumulator += -pos.y;
+                            let line_height = 20.0;
+                            let accumulated_lines = (self.scroll_pixel_accumulator / line_height) as i32;
+                            if accumulated_lines != 0 {
+                                self.scroll_pixel_accumulator -= accumulated_lines as f64 * line_height;
+                            }
+                            accumulated_lines
+                        }
                     };
                     if lines != 0 {
                         if let Some(grid) = &self.grid {
+                            let sidebar_off = self.sidebar_offset();
                             let panels = &self.panels;
                             let panel_types = |pid: PanelId| -> Option<PanelType> {
                                 panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
@@ -2420,6 +2435,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 lines as f32,
                                 grid,
                                 TITLE_BAR_HEIGHT,
+                                sidebar_off,
                                 &panel_types,
                             );
                             for action in actions {
@@ -2695,7 +2711,7 @@ impl ApplicationHandler<UserEvent> for App {
                     // Append sidebar text areas
                     {
                         use glyphon::{TextArea, TextBounds};
-                        let default_color = glyphon::Color::rgba(200, 200, 200, 255);
+                        let default_color = glyphon::Color::rgba(248, 248, 242, 255);
                         for (buf, meta) in self.sidebar_buffers.iter().zip(self.sidebar_metas.iter()) {
                             terminal_text_areas.push(TextArea {
                                 buffer: buf,

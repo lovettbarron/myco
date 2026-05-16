@@ -430,11 +430,11 @@ impl TerminalRenderer {
     ) -> Vec<QuadInstance> {
         let mut quads = Vec::new();
 
-        // Panel background RGB as u8 for comparison
+        // Panel background RGB as sRGB u8 for comparison with terminal palette colors
         let bg_rgb = [
-            (panel_bg[0] * 255.0) as u8,
-            (panel_bg[1] * 255.0) as u8,
-            (panel_bg[2] * 255.0) as u8,
+            crate::theme::linear_to_srgb_u8(panel_bg[0]),
+            crate::theme::linear_to_srgb_u8(panel_bg[1]),
+            crate::theme::linear_to_srgb_u8(panel_bg[2]),
         ];
 
         // Cell background quads: only render where cell bg differs from panel bg
@@ -592,9 +592,9 @@ impl TerminalRenderer {
 
         // Determine color based on whether this is a selection or flash
         let base_color = if let Some(opacity) = flash_opacity {
-            [0.741, 0.576, 0.976, 0.4 * opacity]
+            [0.509, 0.291, 0.946, 0.4 * opacity]
         } else {
-            [0.267, 0.278, 0.353, 0.5]
+            [0.058, 0.063, 0.102, 0.5]
         };
 
         // Get selection range
@@ -676,9 +676,9 @@ impl TerminalRenderer {
 
             let is_current = idx == current_match_idx;
             let color = if is_current {
-                [0.945, 0.980, 0.549, 0.5] // #f1fa8c Dracula yellow, current match
+                [0.879, 0.955, 0.262, 0.5] // #f1fa8c Dracula yellow, current match
             } else {
-                [0.945, 0.980, 0.549, 0.25] // #f1fa8c dimmed, other matches
+                [0.879, 0.955, 0.262, 0.25] // #f1fa8c dimmed, other matches
             };
 
             quads.push(QuadInstance {
@@ -713,7 +713,7 @@ impl TerminalRenderer {
         vec![QuadInstance {
             position: [bar_x, bar_y],
             size: [bar_width, 28.0],
-            color: [0.157, 0.165, 0.212, 0.95],
+            color: [0.021, 0.023, 0.037, 0.95],
             corner_radius: 4.0,
             _padding: 0.0,
         }]
@@ -743,7 +743,7 @@ impl TerminalRenderer {
         quads.push(QuadInstance {
             position: [x, y],
             size: [max_width, 1.0],
-            color: [0.384, 0.447, 0.643, 0.6],
+            color: [0.122, 0.168, 0.371, 0.6],
             corner_radius: 0.0,
             _padding: 0.0,
         });
@@ -763,7 +763,7 @@ impl TerminalRenderer {
         quads.push(QuadInstance {
             position: [cursor_x, pill_y],
             size: [cwd_w, pill_h],
-            color: [0.267, 0.278, 0.353, 0.9],
+            color: [0.058, 0.063, 0.102, 0.9],
             corner_radius: 4.0,
             _padding: 0.0,
         });
@@ -786,7 +786,7 @@ impl TerminalRenderer {
                 quads.push(QuadInstance {
                     position: [cursor_x, pill_y],
                     size: [branch_w, pill_h],
-                    color: [0.267, 0.278, 0.353, 0.9],
+                    color: [0.058, 0.063, 0.102, 0.9],
                     corner_radius: 4.0,
                     _padding: 0.0,
                 });
@@ -810,7 +810,7 @@ impl TerminalRenderer {
                     quads.push(QuadInstance {
                         position: [cursor_x, pill_y],
                         size: [stats_w, pill_h],
-                        color: [0.267, 0.278, 0.353, 0.9],
+                        color: [0.058, 0.063, 0.102, 0.9],
                         corner_radius: 4.0,
                         _padding: 0.0,
                     });

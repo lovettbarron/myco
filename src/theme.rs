@@ -56,6 +56,16 @@ impl Theme {
     }
 }
 
+/// Convert a linear-light f32 channel to sRGB u8 for glyphon text colors.
+pub fn linear_to_srgb_u8(v: f32) -> u8 {
+    let s = if v <= 0.003_130_8 {
+        12.92 * v
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    };
+    (s * 255.0 + 0.5).clamp(0.0, 255.0) as u8
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Self::dark()

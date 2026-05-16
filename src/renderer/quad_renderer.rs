@@ -27,7 +27,7 @@ struct Uniforms {
 }
 
 /// Maximum number of quad instances per frame (T-01-03 mitigation).
-const MAX_INSTANCES: usize = 1000;
+const MAX_INSTANCES: usize = 16384;
 
 /// Instanced colored rectangle renderer.
 ///

@@ -196,7 +196,7 @@ fn body_attrs() -> Attrs<'static> {
     Attrs::new()
         .family(Family::SansSerif)
         .weight(Weight::NORMAL)
-        .color(Color::rgb(219, 215, 207)) // markdown_body_text
+        .color(Color::rgb(248, 248, 242)) // #f8f8f2
 }
 
 fn heading_attrs(level: u8) -> Attrs<'static> {
@@ -204,15 +204,15 @@ fn heading_attrs(level: u8) -> Attrs<'static> {
         1 => Attrs::new()
             .family(Family::SansSerif)
             .weight(Weight::SEMIBOLD)
-            .color(Color::rgb(237, 232, 224)), // markdown_heading_text
+            .color(Color::rgb(189, 147, 249)), // #bd93f9 purple
         2 | 3 => Attrs::new()
             .family(Family::SansSerif)
             .weight(Weight::SEMIBOLD)
-            .color(Color::rgb(237, 232, 224)),
-        _ => Attrs::new() // H4-H6: regular weight per UI-SPEC
+            .color(Color::rgb(189, 147, 249)),
+        _ => Attrs::new()
             .family(Family::SansSerif)
             .weight(Weight::NORMAL)
-            .color(Color::rgb(237, 232, 224)),
+            .color(Color::rgb(189, 147, 249)),
     }
 }
 
@@ -220,21 +220,21 @@ fn code_attrs() -> Attrs<'static> {
     Attrs::new()
         .family(Family::Monospace)
         .weight(Weight::NORMAL)
-        .color(Color::rgb(199, 214, 199)) // markdown_code_text
+        .color(Color::rgb(80, 250, 123)) // #50fa7b green
 }
 
 fn inline_code_attrs() -> Attrs<'static> {
     Attrs::new()
         .family(Family::Monospace)
         .weight(Weight::NORMAL)
-        .color(Color::rgb(199, 214, 199))
+        .color(Color::rgb(80, 250, 123)) // #50fa7b green
 }
 
 fn link_attrs() -> Attrs<'static> {
     Attrs::new()
         .family(Family::SansSerif)
         .weight(Weight::NORMAL)
-        .color(Color::rgb(115, 153, 217)) // markdown_link_text
+        .color(Color::rgb(139, 233, 253)) // #8be9fd cyan
 }
 
 #[cfg(test)]

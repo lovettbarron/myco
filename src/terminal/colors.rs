@@ -37,7 +37,7 @@ impl Default for AnsiPalette {
                 [255, 255, 255],   // Bright White   #ffffff
             ],
             foreground: [248, 248, 242], // #f8f8f2
-            background: [40, 42, 54],    // #282a36
+            background: [44, 46, 59],    // #2c2e3b (matches panel_background)
         }
     }
 }

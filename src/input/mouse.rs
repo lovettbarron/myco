@@ -334,13 +334,15 @@ impl MouseState {
         delta_lines: f32,
         grid: &GridLayout,
         title_bar_height: f32,
+        sidebar_offset: f32,
         panel_types: &dyn Fn(PanelId) -> Option<PanelType>,
     ) -> Vec<InputAction> {
         let mut actions = Vec::new();
 
-        // Find which panel the cursor is over
+        // Subtract sidebar offset from cursor x to convert screen coords to grid coords
+        let grid_x = self.cursor_x as f32 - sidebar_offset;
         if let Some(panel_id) =
-            find_panel_at(grid, self.cursor_x as f32, self.cursor_y as f32, title_bar_height)
+            find_panel_at(grid, grid_x, self.cursor_y as f32, title_bar_height)
         {
             match panel_types(panel_id) {
                 Some(PanelType::Terminal) => {
@@ -466,4 +468,113 @@ fn hit_test_buttons(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TITLE_BAR_H: f32 = 32.0;
+
+    fn make_grid(width: f32, height: f32) -> GridLayout {
+        let mut grid = GridLayout::new_single_panel();
+        grid.compute(width, height);
+        grid
+    }
+
+    fn terminal_type(_: PanelId) -> Option<PanelType> {
+        Some(PanelType::Terminal)
+    }
+
+    #[test]
+    fn scroll_routes_to_terminal_panel() {
+        let grid = make_grid(800.0, 600.0);
+        let mut ms = MouseState::default();
+        ms.cursor_x = 400.0;
+        ms.cursor_y = 300.0;
+        let actions = ms.on_mouse_wheel(3.0, &grid, TITLE_BAR_H, 0.0, &terminal_type);
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            InputAction::TerminalScroll { delta, .. } => assert_eq!(*delta, 3),
+            other => panic!("expected TerminalScroll, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn scroll_with_sidebar_offset_hits_panel() {
+        let sidebar_w = 240.0;
+        let grid = make_grid(800.0 - sidebar_w, 600.0);
+        let mut ms = MouseState::default();
+        // Cursor at screen x=400, grid x should be 400-240=160
+        ms.cursor_x = 400.0;
+        ms.cursor_y = 300.0;
+        let actions = ms.on_mouse_wheel(3.0, &grid, TITLE_BAR_H, sidebar_w, &terminal_type);
+        assert_eq!(actions.len(), 1);
+    }
+
+    #[test]
+    fn scroll_with_sidebar_offset_right_edge() {
+        let sidebar_w = 240.0;
+        let window_w = 1440.0;
+        let grid_w = window_w - sidebar_w;
+        let grid = make_grid(grid_w, 600.0);
+        let mut ms = MouseState::default();
+        // Cursor at the far right edge of the window
+        ms.cursor_x = (window_w - 10.0) as f64;
+        ms.cursor_y = 300.0;
+        let actions = ms.on_mouse_wheel(3.0, &grid, TITLE_BAR_H, sidebar_w, &terminal_type);
+        assert_eq!(actions.len(), 1, "scroll at right edge should hit panel");
+    }
+
+    #[test]
+    fn scroll_outside_panel_produces_no_action() {
+        let grid = make_grid(800.0, 600.0);
+        let mut ms = MouseState::default();
+        // Cursor in the title bar (above grid panels)
+        ms.cursor_x = 400.0;
+        ms.cursor_y = 10.0;
+        let actions = ms.on_mouse_wheel(3.0, &grid, TITLE_BAR_H, 0.0, &terminal_type);
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn pixel_accumulator_collects_small_deltas() {
+        let line_height = 20.0;
+        let mut accum: f64 = 0.0;
+        let mut total_lines = 0i32;
+
+        // Simulate 10 small trackpad events of -5px each (50px total, should yield 2 lines)
+        for _ in 0..10 {
+            accum += 5.0; // negated pixel delta (scrolling up)
+            let lines = (accum / line_height) as i32;
+            if lines != 0 {
+                accum -= lines as f64 * line_height;
+                total_lines += lines;
+            }
+        }
+        assert_eq!(total_lines, 2, "50px of scroll should produce 2 lines at 20px/line");
+        assert!((accum - 10.0).abs() < 0.001, "10px remainder should be left in accumulator");
+    }
+
+    #[test]
+    fn pixel_accumulator_handles_direction_change() {
+        let line_height = 20.0;
+        let mut accum: f64 = 0.0;
+
+        // Scroll up 15px (not enough for a line)
+        accum += 15.0;
+        let lines = (accum / line_height) as i32;
+        assert_eq!(lines, 0);
+
+        // Scroll down 30px (net -15px)
+        accum += -30.0;
+        let lines = (accum / line_height) as i32;
+        assert_eq!(lines, 0, "net -15px should not produce a line yet");
+        // Accumulator is now -15.0
+
+        // Scroll down another 10px (net -25px)
+        accum += -10.0;
+        let lines = (accum / line_height) as i32;
+        assert_eq!(lines, -1, "-25px should produce -1 line");
+    }
 }

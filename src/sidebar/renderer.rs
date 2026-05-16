@@ -2,7 +2,7 @@ use glyphon::cosmic_text::{Attrs, Family, FontSystem, Metrics, Shaping, Weight};
 use glyphon::{Buffer, Color as GlyphonColor};
 
 use crate::renderer::quad_renderer::QuadInstance;
-use crate::theme::Theme;
+use crate::theme::{Theme, linear_to_srgb_u8};
 
 use super::{SidebarState, ENTRY_HEIGHT_PX, SIDEBAR_WIDTH};
 
@@ -107,7 +107,7 @@ impl SidebarRenderer {
         let header_attrs = Attrs::new()
             .family(Family::SansSerif)
             .weight(Weight::SEMIBOLD)
-            .color(GlyphonColor::rgb(128, 128, 133)); // label text color
+            .color(GlyphonColor::rgb(98, 114, 164)); // #6272a4 Dracula comment
         let default_attrs = Attrs::new();
         header_buf.set_rich_text(
             font_system,
@@ -169,9 +169,9 @@ impl SidebarRenderer {
                 .family(Family::SansSerif)
                 .weight(weight)
                 .color(GlyphonColor::rgba(
-                    (text_color[0] * 255.0) as u8,
-                    (text_color[1] * 255.0) as u8,
-                    (text_color[2] * 255.0) as u8,
+                    linear_to_srgb_u8(text_color[0]),
+                    linear_to_srgb_u8(text_color[1]),
+                    linear_to_srgb_u8(text_color[2]),
                     255,
                 ));
 
@@ -210,11 +210,11 @@ impl SidebarRenderer {
                 .family(Family::SansSerif)
                 .weight(Weight::NORMAL)
                 .color(GlyphonColor::rgba(
-                    (theme.divider_hover[0] * 255.0) as u8,
-                    (theme.divider_hover[1] * 255.0) as u8,
-                    (theme.divider_hover[2] * 255.0) as u8,
+                    linear_to_srgb_u8(theme.divider_hover[0]),
+                    linear_to_srgb_u8(theme.divider_hover[1]),
+                    linear_to_srgb_u8(theme.divider_hover[2]),
                     255,
-                )); // accent color text
+                ));
 
             let mut btn_buf = Buffer::new(font_system, entry_metrics);
             btn_buf.set_size(
