@@ -19,6 +19,9 @@ impl MycoEventListener {
 
 impl EventListener for MycoEventListener {
     fn send_event(&self, event: Event) {
-        let _ = self.sender.send(event);
+        if let Err(e) = self.sender.send(event) {
+            // Receiver dropped (panel closing) -- expected during teardown
+            tracing::debug!("EventListener: channel closed, dropping event: {:?}", e.0);
+        }
     }
 }
