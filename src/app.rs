@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, Window, WindowId};
@@ -31,6 +31,8 @@ use crate::renderer::text_renderer::TextLabel;
 use crate::renderer::Renderer;
 use crate::canvas::CanvasManager;
 use crate::markdown::{MarkdownManager, MarkdownRenderer};
+use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_WIDTH};
+use crate::sidebar::renderer::SidebarRenderer;
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
 use crate::theme::Theme;
@@ -122,6 +124,12 @@ pub struct App {
     terminal_renderer: TerminalRenderer,
     /// GPU markdown renderer (buffer caching, quad generation for code blocks/blockquotes/HRs).
     markdown_renderer: crate::markdown::renderer::MarkdownRenderer,
+    /// File sidebar state (project file tree browser).
+    sidebar: Option<SidebarState>,
+    /// Sidebar text buffers (cached for rendering).
+    sidebar_buffers: Vec<glyphon::Buffer>,
+    /// Sidebar text area metadata (positions for each buffer).
+    sidebar_metas: Vec<crate::sidebar::renderer::SidebarTextAreaMeta>,
     /// File watcher monitoring the project directory for changes.
     file_watcher: Option<FileWatcher>,
     /// Proxy for waking the event loop from background threads.
@@ -157,6 +165,9 @@ impl App {
             pending_actions: Vec::new(),
             terminal_renderer: TerminalRenderer::new(),
             markdown_renderer: crate::markdown::renderer::MarkdownRenderer::new(),
+            sidebar: None,
+            sidebar_buffers: Vec::new(),
+            sidebar_metas: Vec::new(),
             file_watcher: None,
             proxy: Some(proxy),
             redraw_pending: false,
@@ -777,13 +788,57 @@ impl App {
 
             // === Sidebar actions (Phase 3, Plan 03) ===
             InputAction::ToggleSidebar => {
-                // Implemented in Plan 03
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.toggle();
+                    self.recompute_layout();
+                }
             }
-            InputAction::SidebarSelect { path: _ } => {
-                // Implemented in Plan 03
+            InputAction::SidebarSelect { path } => {
+                // T-03-09: Validate path is within project directory
+                let is_valid = self
+                    .sidebar
+                    .as_ref()
+                    .map(|s| path.starts_with(s.project_dir()))
+                    .unwrap_or(false);
+                if !is_valid {
+                    warn!("Sidebar: rejected path outside project directory: {:?}", path);
+                    return;
+                }
+
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                match ext {
+                    "md" | "markdown" => {
+                        self.process_action(InputAction::OpenMarkdown { path });
+                    }
+                    "tldr" => {
+                        // Extract canvas_id from filename
+                        let canvas_id = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        self.create_canvas_with_id(&canvas_id);
+                    }
+                    _ => {} // Other file types ignored in Phase 3
+                }
             }
             InputAction::SidebarNewCanvas => {
-                // Implemented in Plan 03
+                if let Some(sidebar) = &self.sidebar {
+                    if let Some(action) = sidebar.new_canvas() {
+                        match action {
+                            SidebarAction::CreateCanvas(canvas_id, _path) => {
+                                self.create_canvas_with_id(&canvas_id);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                // Refresh sidebar to show new file
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.refresh_file_tree();
+                }
             }
 
             // === Focus cycling (Phase 3) ===
@@ -811,11 +866,13 @@ impl App {
     }
 
     /// Get the content bounds (below panel title) for a panel in logical pixels.
+    /// When sidebar is visible, panel x positions are offset by SIDEBAR_WIDTH.
     fn panel_content_bounds(&self, panel_id: PanelId) -> (f32, f32, f32, f32) {
         if let Some(grid) = &self.grid {
             if let Some(node_id) = grid.find_node(panel_id) {
                 let (x, y, w, h) = grid.get_panel_rect(node_id);
-                let content_x = x;
+                let sidebar_offset = self.sidebar_offset();
+                let content_x = x + sidebar_offset;
                 let content_y = y + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
                 let content_w = w;
                 let content_h = h - PANEL_TITLE_HEIGHT;
@@ -825,7 +882,50 @@ impl App {
         (0.0, 0.0, 400.0, 300.0) // Fallback
     }
 
+    /// Get the sidebar x offset (SIDEBAR_WIDTH when visible, 0 when hidden).
+    fn sidebar_offset(&self) -> f32 {
+        if self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false) {
+            SIDEBAR_WIDTH
+        } else {
+            0.0
+        }
+    }
+
+    /// Create a canvas panel with the given canvas_id.
+    /// Shared between CreateCanvas action and sidebar-triggered canvas creation.
+    fn create_canvas_with_id(&mut self, canvas_id: &str) {
+        if let Some(focused_id) = self.focused_panel {
+            if let Some(grid) = self.grid.as_mut() {
+                if let Some(new_id) =
+                    operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
+                {
+                    let panel = Panel::new_canvas(new_id, canvas_id.to_string());
+                    self.panels.push(panel);
+                    self.focused_panel = Some(new_id);
+                    self.recompute_layout();
+
+                    // Create canvas webview
+                    let bounds = self.panel_content_bounds(new_id);
+                    if let (Some(cm), Some(window), Some(proxy)) =
+                        (&mut self.canvas_manager, &self.window, &self.proxy)
+                    {
+                        if let Err(e) = cm.create_canvas(
+                            new_id,
+                            canvas_id,
+                            window,
+                            bounds,
+                            proxy.clone(),
+                        ) {
+                            warn!("Failed to create canvas: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Recompute grid layout and divider positions.
+    /// D-11: Subtracts sidebar width from available grid width when sidebar is visible.
     fn recompute_layout(&mut self) {
         if let (Some(grid), Some(window)) = (self.grid.as_mut(), self.window.as_ref()) {
             let size = window.inner_size();
@@ -833,8 +933,17 @@ impl App {
                 let w = size.width as f32 / self.scale_factor;
                 let h = size.height as f32 / self.scale_factor;
                 let grid_height = h - TITLE_BAR_HEIGHT;
-                grid.compute(w, grid_height.max(1.0));
-                self.dividers = compute_dividers(grid, w, grid_height.max(1.0));
+
+                // D-11: Subtract sidebar width when visible
+                let sidebar_w = if self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false) {
+                    SIDEBAR_WIDTH
+                } else {
+                    0.0
+                };
+                let grid_width = w - sidebar_w;
+
+                grid.compute(grid_width, grid_height.max(1.0));
+                self.dividers = compute_dividers(grid, grid_width, grid_height.max(1.0));
             }
         }
 
@@ -894,9 +1003,28 @@ impl App {
             _padding: 0.0,
         });
 
+        let sidebar_offset = self.sidebar_offset();
+
+        // Render sidebar quads
+        if let Some(sidebar) = &self.sidebar {
+            if sidebar.visible {
+                let sidebar_viewport_y = TITLE_BAR_HEIGHT;
+                let sidebar_viewport_h = height - TITLE_BAR_HEIGHT;
+                let sidebar_quads = SidebarRenderer::build_quads(
+                    sidebar,
+                    sidebar_viewport_y,
+                    sidebar_viewport_h,
+                    &self.theme,
+                );
+                quads.extend(sidebar_quads);
+            }
+        }
+
         // Panel quads
         for &(node, panel_id) in grid.panel_nodes() {
             let (px, py, pw, ph) = grid.get_panel_rect(node);
+            // Offset panel x position by sidebar width
+            let px = px + sidebar_offset;
             let py_offset = py + TITLE_BAR_HEIGHT;
 
             // Panel background quad
@@ -1059,7 +1187,30 @@ impl App {
             }
         }
 
-        // Divider quads
+        // D-16: Unfocused panel overlay (semi-transparent black on unfocused GPU panels)
+        for &(node, panel_id) in grid.panel_nodes() {
+            if Some(panel_id) == self.focused_panel {
+                continue; // Skip focused panel
+            }
+            // Canvas desaturation handled via CSS (already in Plan 01)
+            let is_canvas = self
+                .panels
+                .iter()
+                .any(|p| p.id == panel_id && p.panel_type == PanelType::Canvas);
+            if is_canvas {
+                continue;
+            }
+            let (px, py, pw, ph) = grid.get_panel_rect(node);
+            quads.push(QuadInstance {
+                position: [px + sidebar_offset, py + TITLE_BAR_HEIGHT],
+                size: [pw, ph],
+                color: self.theme.unfocused_overlay,
+                corner_radius: 0.0,
+                _padding: 0.0,
+            });
+        }
+
+        // Divider quads (offset by sidebar width)
         for (i, div) in self.dividers.dividers.iter().enumerate() {
             let is_hovered = self.mouse_state.hovered_divider == Some(i);
             let color = if is_hovered {
@@ -1073,7 +1224,7 @@ impl App {
                     let grid_height = height - TITLE_BAR_HEIGHT;
                     quads.push(QuadInstance {
                         position: [
-                            div.position - DIVIDER_VISUAL_WIDTH / 2.0,
+                            div.position - DIVIDER_VISUAL_WIDTH / 2.0 + sidebar_offset,
                             TITLE_BAR_HEIGHT,
                         ],
                         size: [DIVIDER_VISUAL_WIDTH, grid_height],
@@ -1085,11 +1236,11 @@ impl App {
                 Orientation::Horizontal => {
                     quads.push(QuadInstance {
                         position: [
-                            0.0,
+                            sidebar_offset,
                             div.position + TITLE_BAR_HEIGHT
                                 - DIVIDER_VISUAL_WIDTH / 2.0,
                         ],
-                        size: [width, DIVIDER_VISUAL_WIDTH],
+                        size: [width - sidebar_offset, DIVIDER_VISUAL_WIDTH],
                         color,
                         corner_radius: 0.0,
                         _padding: 0.0,
@@ -1127,9 +1278,12 @@ impl App {
             ),
         });
 
+        let sidebar_offset = self.sidebar_offset();
+
         // Panel labels
         for &(node, panel_id) in grid.panel_nodes() {
             let (px, py, pw, ph) = grid.get_panel_rect(node);
+            let px = px + sidebar_offset;
             let py_offset = py + TITLE_BAR_HEIGHT;
 
             if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
@@ -1302,7 +1456,10 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(mm) = &mut self.markdown_manager {
                     mm.handle_file_changed(&paths);
                 }
-                // Note: sidebar file tree refresh will be added in Plan 03
+                // Refresh sidebar file tree on file system changes
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.refresh_file_tree();
+                }
             }
         }
         // Drain pending actions (from IPC shortcut forwarding)
@@ -1379,6 +1536,9 @@ impl ApplicationHandler<UserEvent> for App {
         // Create canvas manager for TLDraw webview panels
         self.canvas_manager = Some(CanvasManager::new(project_dir.clone()));
 
+        // Create file sidebar state
+        self.sidebar = Some(SidebarState::new(project_dir.clone()));
+
         // Start file watcher for live markdown updates (CAP-04)
         if let Some(proxy) = &self.proxy {
             match FileWatcher::new(&project_dir, proxy.clone()) {
@@ -1445,6 +1605,20 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let lx = position.x / self.scale_factor as f64;
                 let ly = position.y / self.scale_factor as f64;
+
+                // Update sidebar hover state
+                let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
+                if sidebar_visible && (lx as f32) < SIDEBAR_WIDTH && (ly as f32) > TITLE_BAR_HEIGHT {
+                    let sidebar_y = ly as f32 - TITLE_BAR_HEIGHT;
+                    if let Some(sidebar) = &mut self.sidebar {
+                        sidebar.hovered = sidebar.entry_at_y(sidebar_y);
+                    }
+                } else if sidebar_visible {
+                    if let Some(sidebar) = &mut self.sidebar {
+                        sidebar.hovered = None;
+                    }
+                }
+
                 if let Some(grid) = &self.grid {
                     let actions = self.mouse_state.on_cursor_moved(
                         lx,
@@ -1461,7 +1635,53 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
-                if let Some(grid) = &self.grid {
+                let lx = self.mouse_state.cursor_x as f32;
+                let ly = self.mouse_state.cursor_y as f32;
+
+                // Check if click is in the sidebar region
+                let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
+                if sidebar_visible
+                    && lx < SIDEBAR_WIDTH
+                    && ly > TITLE_BAR_HEIGHT
+                    && state == ElementState::Pressed
+                    && button == MouseButton::Left
+                {
+                    let sidebar_y = ly - TITLE_BAR_HEIGHT;
+                    // Handle sidebar click
+                    if let Some(sidebar) = &mut self.sidebar {
+                        if let Some(index) = sidebar.entry_at_y(sidebar_y) {
+                            if let Some(action) = sidebar.click_entry(index) {
+                                match action {
+                                    SidebarAction::OpenMarkdown(path) => {
+                                        self.process_action(InputAction::OpenMarkdown { path });
+                                    }
+                                    SidebarAction::OpenCanvas(path) => {
+                                        let canvas_id = path
+                                            .file_stem()
+                                            .map(|s| s.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        self.create_canvas_with_id(&canvas_id);
+                                    }
+                                    SidebarAction::CreateCanvas(canvas_id, _path) => {
+                                        self.create_canvas_with_id(&canvas_id);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Check if clicked on "New Canvas" button area
+                            let header_offset = 16.0 + 15.6 + 8.0;
+                            let entries_end = header_offset
+                                + (sidebar.entries.len() as f32 * crate::sidebar::ENTRY_HEIGHT_PX)
+                                + 8.0
+                                - sidebar.scroll_offset;
+                            if sidebar_y >= entries_end
+                                && sidebar_y <= entries_end + crate::sidebar::ENTRY_HEIGHT_PX
+                            {
+                                self.process_action(InputAction::SidebarNewCanvas);
+                            }
+                        }
+                    }
+                } else if let Some(grid) = &self.grid {
                     let panels = &self.panels;
                     let panel_types = |pid: PanelId| -> Option<PanelType> {
                         panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
@@ -1489,27 +1709,43 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
-                // Negate for natural scrolling convention: on macOS with natural
-                // scrolling, positive y means "scroll down" (content moves up),
-                // but positive delta to TerminalScroll means "scroll up/back".
-                let lines = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(_, y) => -(y * 3.0) as i32,
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as i32,
-                };
-                if lines != 0 {
-                    if let Some(grid) = &self.grid {
-                        let panels = &self.panels;
-                        let panel_types = |pid: PanelId| -> Option<PanelType> {
-                            panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
-                        };
-                        let actions = self.mouse_state.on_mouse_wheel(
-                            lines as f32,
-                            grid,
-                            TITLE_BAR_HEIGHT,
-                            &panel_types,
-                        );
-                        for action in actions {
-                            self.process_action(action);
+                let lx = self.mouse_state.cursor_x as f32;
+
+                // If mouse is over sidebar, scroll sidebar instead of panels
+                let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
+                if sidebar_visible && lx < SIDEBAR_WIDTH {
+                    let pixel_delta = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => y * 21.0,
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                    };
+                    if let (Some(sidebar), Some(window)) = (&mut self.sidebar, &self.window) {
+                        let size = window.inner_size();
+                        let viewport_h = size.height as f32 / self.scale_factor - TITLE_BAR_HEIGHT;
+                        sidebar.scroll(-pixel_delta, viewport_h);
+                    }
+                } else {
+                    // Negate for natural scrolling convention: on macOS with natural
+                    // scrolling, positive y means "scroll down" (content moves up),
+                    // but positive delta to TerminalScroll means "scroll up/back".
+                    let lines = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => -(y * 3.0) as i32,
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as i32,
+                    };
+                    if lines != 0 {
+                        if let Some(grid) = &self.grid {
+                            let panels = &self.panels;
+                            let panel_types = |pid: PanelId| -> Option<PanelType> {
+                                panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
+                            };
+                            let actions = self.mouse_state.on_mouse_wheel(
+                                lines as f32,
+                                grid,
+                                TITLE_BAR_HEIGHT,
+                                &panel_types,
+                            );
+                            for action in actions {
+                                self.process_action(action);
+                            }
                         }
                     }
                 }
@@ -1617,6 +1853,8 @@ impl ApplicationHandler<UserEvent> for App {
                         })
                         .collect();
 
+                    let sidebar_off = self.sidebar_offset();
+
                     // Phase 1: Update terminal and markdown buffer caches
                     if let Some(renderer) = &mut self.renderer {
                         let font_system = renderer.text_engine_mut().font_system_mut();
@@ -1639,7 +1877,7 @@ impl ApplicationHandler<UserEvent> for App {
                                                     panel_id,
                                                     font_system,
                                                     snapshot,
-                                                    px,
+                                                    px + sidebar_off,
                                                     content_y,
                                                     pw,
                                                     content_h,
@@ -1676,7 +1914,7 @@ impl ApplicationHandler<UserEvent> for App {
                                             &state.blocks,
                                             &state.block_heights,
                                             state.scroll_offset,
-                                            px,
+                                            px + sidebar_off,
                                             content_y,
                                             pw,
                                             content_h,
@@ -1688,12 +1926,54 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             drop(_md_span);
                         }
+
+                        // Sidebar buffer preparation
+                        if let Some(sidebar) = &self.sidebar {
+                            if sidebar.visible {
+                                let sidebar_viewport_y = TITLE_BAR_HEIGHT;
+                                let sidebar_viewport_h = logical_h - TITLE_BAR_HEIGHT;
+                                let (bufs, metas) = SidebarRenderer::prepare_buffers(
+                                    font_system,
+                                    sidebar,
+                                    sidebar_viewport_y,
+                                    sidebar_viewport_h,
+                                    &self.theme,
+                                );
+                                self.sidebar_buffers = bufs;
+                                self.sidebar_metas = metas;
+                            } else {
+                                self.sidebar_buffers.clear();
+                                self.sidebar_metas.clear();
+                            }
+                        }
                     }
 
                     // Phase 2: Collect cached TextAreas and render
                     let mut terminal_text_areas = self.terminal_renderer.collect_text_areas(s);
                     // Append markdown text areas to the same vec
                     terminal_text_areas.extend(self.markdown_renderer.collect_text_areas(s));
+
+                    // Append sidebar text areas
+                    {
+                        use glyphon::{TextArea, TextBounds};
+                        let default_color = glyphon::Color::rgba(200, 200, 200, 255);
+                        for (buf, meta) in self.sidebar_buffers.iter().zip(self.sidebar_metas.iter()) {
+                            terminal_text_areas.push(TextArea {
+                                buffer: buf,
+                                left: meta.left * s,
+                                top: meta.top * s,
+                                scale: s,
+                                bounds: TextBounds {
+                                    left: 0,
+                                    top: (TITLE_BAR_HEIGHT * s) as i32,
+                                    right: (SIDEBAR_WIDTH * s) as i32,
+                                    bottom: (logical_h * s) as i32,
+                                },
+                                default_color,
+                                custom_glyphs: &[],
+                            });
+                        }
+                    }
 
                     if let Some(renderer) = &mut self.renderer {
                         match renderer.render(
