@@ -215,36 +215,31 @@ impl App {
                 }
             }
             InputAction::TerminalCopy { panel_id } => {
-                if let Some(tm) = &self.terminal_manager {
-                    if let Some(ts) = tm.get(&panel_id) {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
                         let term = ts.term.lock();
                         // D-13: if selection exists, copy; otherwise send SIGINT
-                        if let Some(selection) = term.selection.as_ref() {
-                            if let Some(_range) = selection.to_range(&*term) {
-                                let text = term.selection_to_string();
-                                if let Some(text) = text {
-                                    // Copy to clipboard
-                                    if let Ok(mut ctx) = copypasta::ClipboardContext::new() {
-                                        use copypasta::ClipboardProvider;
-                                        let _ = ctx.set_contents(text);
-                                    }
+                        if term.selection.is_some() {
+                            if let Some(text) =
+                                crate::terminal::selection::selection_to_string(&term)
+                            {
+                                drop(term); // Release lock before clipboard access
+                                if let Ok(mut ctx) = copypasta::ClipboardContext::new() {
+                                    use copypasta::ClipboardProvider;
+                                    let _ = ctx.set_contents(text);
                                 }
-                            }
-                            // Clear selection after copy
-                            drop(term);
-                            if let Some(tm) = &self.terminal_manager {
-                                if let Some(ts) = tm.get(&panel_id) {
-                                    ts.term.lock().selection = None;
-                                }
+                                // Trigger copy flash (D-15)
+                                ts.trigger_copy_flash();
+                                // Clear selection after flash starts
+                                let mut term = ts.term.lock();
+                                crate::terminal::selection::clear_selection(&mut term);
+                            } else {
+                                drop(term);
                             }
                         } else {
                             // No selection: send SIGINT (Ctrl+C = 0x03)
                             drop(term);
-                            if let Some(tm) = &self.terminal_manager {
-                                if let Some(ts) = tm.get(&panel_id) {
-                                    ts.write_to_pty(&[0x03]);
-                                }
-                            }
+                            ts.write_to_pty(&[0x03]);
                         }
                     }
                 }
@@ -358,16 +353,108 @@ impl App {
                 }
             }
 
-            // Stub actions (selection, search -- implemented later in this plan)
+            InputAction::TerminalSelectionStart {
+                panel_id,
+                x,
+                y,
+                block,
+            } => {
+                if let (Some(tm), Some(grid)) = (&mut self.terminal_manager, &self.grid) {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        // Check if click is on the "New output" indicator (D-10)
+                        if ts.has_new_output_while_scrolled {
+                            if let Some(node) = grid.find_node(panel_id) {
+                                let (px, py, pw, ph) = grid.get_panel_rect(node);
+                                let py_offset = py + TITLE_BAR_HEIGHT;
+                                let indicator_w = 120.0_f32;
+                                let indicator_h = 22.0_f32;
+                                let indicator_x = px + pw / 2.0 - indicator_w / 2.0;
+                                let indicator_y = py_offset + ph - indicator_h - 4.0;
+                                if x >= indicator_x
+                                    && x <= indicator_x + indicator_w
+                                    && y >= indicator_y
+                                    && y <= indicator_y + indicator_h
+                                {
+                                    ts.scroll_to_bottom();
+                                    return;
+                                }
+                            }
+                        }
+
+                        if let Some(node) = grid.find_node(panel_id) {
+                            let (px, py, _pw, _ph) = grid.get_panel_rect(node);
+                            let viewport_x = px;
+                            let viewport_y =
+                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+                            let display_offset =
+                                ts.term.lock().grid().display_offset();
+                            let point = crate::terminal::selection::pixel_to_point(
+                                x,
+                                y,
+                                viewport_x,
+                                viewport_y,
+                                ts.cell_width,
+                                ts.cell_height,
+                                display_offset,
+                            );
+                            let click_count = self.mouse_state.click_count;
+                            let mut term = ts.term.lock();
+                            crate::terminal::selection::start_selection(
+                                &mut term,
+                                point,
+                                click_count,
+                                block,
+                            );
+                        }
+                    }
+                }
+            }
+
+            InputAction::TerminalSelectionUpdate { panel_id, x, y } => {
+                if let (Some(tm), Some(grid)) = (&mut self.terminal_manager, &self.grid) {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        if let Some(node) = grid.find_node(panel_id) {
+                            let (px, py, _pw, _ph) = grid.get_panel_rect(node);
+                            let viewport_x = px;
+                            let viewport_y =
+                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+                            let display_offset =
+                                ts.term.lock().grid().display_offset();
+                            let point = crate::terminal::selection::pixel_to_point(
+                                x,
+                                y,
+                                viewport_x,
+                                viewport_y,
+                                ts.cell_width,
+                                ts.cell_height,
+                                display_offset,
+                            );
+                            let mut term = ts.term.lock();
+                            crate::terminal::selection::update_selection(
+                                &mut term, point,
+                            );
+                        }
+                    }
+                }
+            }
+
+            InputAction::TerminalSelectionEnd { panel_id } => {
+                // Selection stays visible -- cleared on next click or Cmd+C
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        let mut term = ts.term.lock();
+                        crate::terminal::selection::end_selection(&mut term);
+                    }
+                }
+            }
+
+            // Stub actions (search -- implemented in Task 3)
             InputAction::TerminalSearchOpen { .. }
             | InputAction::TerminalSearchClose { .. }
             | InputAction::TerminalSearchNext { .. }
             | InputAction::TerminalSearchPrev { .. }
-            | InputAction::TerminalSearchUpdate { .. }
-            | InputAction::TerminalSelectionStart { .. }
-            | InputAction::TerminalSelectionUpdate { .. }
-            | InputAction::TerminalSelectionEnd { .. } => {
-                // Stub: implemented in subsequent tasks
+            | InputAction::TerminalSearchUpdate { .. } => {
+                // Stub: implemented in Task 3
             }
         }
     }
@@ -495,6 +582,22 @@ impl App {
                                     ts.cursor_blink_visible,
                                 );
                             quads.extend(term_quads);
+
+                            // Selection highlight and copy flash quads
+                            {
+                                let term = ts.term.lock();
+                                let flash_opacity = ts.copy_flash_opacity();
+                                let sel_quads =
+                                    self.terminal_renderer.build_selection_quads(
+                                        &term,
+                                        px,
+                                        content_y,
+                                        ts.cell_width,
+                                        ts.cell_height,
+                                        flash_opacity,
+                                    );
+                                quads.extend(sel_quads);
+                            }
 
                             // "New output" indicator (D-10): show when scrolled up and new output arrived
                             if ts.has_new_output_while_scrolled {
@@ -982,6 +1085,10 @@ impl ApplicationHandler for App {
         if let Some(tm) = &mut self.terminal_manager {
             tm.drain_all_events();
             tm.update_all_cursor_blinks();
+            // Clear expired copy flash animations (D-15)
+            for ts in tm.terminals_mut().values_mut() {
+                ts.clear_expired_flash();
+            }
         }
 
         if let Some(window) = &self.window {

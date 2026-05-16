@@ -415,4 +415,78 @@ impl TerminalRenderer {
 
         quads
     }
+
+    /// Build quad instances for selection highlighting and copy flash.
+    ///
+    /// Renders semi-transparent overlay quads on selected cells.
+    /// If `flash_opacity` is Some, renders a fading copy-flash instead (D-15).
+    pub fn build_selection_quads(
+        &self,
+        term: &Term<MycoEventListener>,
+        viewport_x: f32,
+        viewport_y: f32,
+        cell_width: f32,
+        cell_height: f32,
+        flash_opacity: Option<f32>,
+    ) -> Vec<QuadInstance> {
+        let mut quads = Vec::new();
+
+        // Determine color based on whether this is a selection or flash
+        let base_color = if let Some(opacity) = flash_opacity {
+            [0.5, 0.7, 1.0, 0.4 * opacity]
+        } else {
+            [0.3, 0.5, 0.8, 0.3]
+        };
+
+        // Get selection range
+        if let Some(ref selection) = term.selection {
+            if let Some(range) = selection.to_range(term) {
+                let display_offset = term.grid().display_offset();
+                let screen_lines = term.screen_lines();
+                let num_cols = term.columns();
+
+                let start = range.start;
+                let end = range.end;
+
+                // Iterate visible lines and check if they intersect the selection
+                for line_idx in 0..screen_lines {
+                    let line = Line(line_idx as i32 - display_offset as i32);
+
+                    // Determine if this line is in the selection range
+                    if line < start.line || line > end.line {
+                        continue;
+                    }
+
+                    let start_col = if line == start.line {
+                        start.column.0
+                    } else {
+                        0
+                    };
+                    let end_col = if line == end.line {
+                        end.column.0 + 1
+                    } else {
+                        num_cols
+                    };
+
+                    if start_col >= end_col {
+                        continue;
+                    }
+
+                    let x = viewport_x + (start_col as f32) * cell_width;
+                    let y = viewport_y + (line_idx as f32) * cell_height;
+                    let w = ((end_col - start_col) as f32) * cell_width;
+
+                    quads.push(QuadInstance {
+                        position: [x, y],
+                        size: [w, cell_height],
+                        color: base_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                }
+            }
+        }
+
+        quads
+    }
 }
