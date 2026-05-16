@@ -37,7 +37,7 @@ impl Default for AnsiPalette {
                 [238, 238, 236],   // Bright White
             ],
             foreground: [211, 215, 207],
-            background: [30, 30, 36],
+            background: [36, 36, 41],
         }
     }
 }
