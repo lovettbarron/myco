@@ -11,7 +11,7 @@ An AI-native project control surface built in Rust. Myco treats the project fold
 
 - **Stack**: Rust + wgpu (GPU rendering) + wry (webview embedding) + alacritty_terminal (VTE/PTY). No Electron
 - **Platform**: macOS first. Architecture must support Linux portability (wgpu + wry both support Linux, but macOS-specific optimizations like Metal are acceptable)
-- **Licensing**: Cannot use Warp's AGPL code (terminal, editor, core). Can use WarpUI (MIT) and forked deps (Apache-2.0). Clean-room approach for any patterns inspired by AGPL crates
+- **Licensing**: AGPL-3.0. Warp's AGPL crates are license-compatible but architecturally incompatible (tightly coupled to Warp's internal systems, no webview interop). alacritty_terminal chosen for technical fit, not license avoidance
 - **Config format**: JSON for .myco project files and ~/.myco global config
 - **Distribution**: DMG with code signing and notarization via Apple Developer account
 - **Solo developer**: Architecture decisions must be realistic for one person. Prioritize shipping a usable core loop over comprehensive features
@@ -93,7 +93,7 @@ An AI-native project control surface built in Rust. Myco treats the project fold
 | GPU API | wgpu | WarpUI (MIT) | Tightly coupled to Warp, no webview interop, studying patterns is fine but adopting as dep is not |
 | Text rendering | glyphon + cosmic-text | crossfont | crossfont is Alacritty's rasterizer but doesn't do GPU atlas rendering. glyphon handles the full pipeline (shaping to GPU texture atlas) |
 | Text rendering | glyphon + cosmic-text | wgpu_glyph | wgpu_glyph is older, less maintained. glyphon is its successor |
-| Terminal emulation | alacritty_terminal | Warp's terminal crate | AGPL-3.0, cannot use |
+| Terminal emulation | alacritty_terminal | Warp's terminal crate | Tightly coupled to WarpUI entity system, no embeddable API, no webview interop path |
 | Terminal emulation | alacritty_terminal | Custom VTE parser | Months of work for an inferior result. alacritty_terminal is battle-tested |
 | PTY | portable-pty | alacritty built-in PTY | portable-pty has cleaner API, better cross-platform abstraction, concurrent reader support |
 | Webview | wry | CEF (Chromium Embedded) | Massive binary size (100MB+), C++ FFI complexity. WKWebView via wry is native and tiny |
@@ -142,8 +142,8 @@ An AI-native project control surface built in Rust. Myco treats the project fold
 |------------|---------|
 | Electron | 500MB+ memory, defeats the purpose of Rust. Project explicitly rules this out. |
 | GPUI | Pre-1.0, no standalone support, no webview interop. Studying patterns is fine. |
-| WarpUI as dependency | MIT-licensed but tightly coupled to Warp's AGPL codebase. Study the Entity-Component-Handle pattern, don't import the crate. |
-| Warp's terminal/editor/core crates | AGPL-3.0. Cannot use. Clean-room only. |
+| WarpUI as dependency | Tightly coupled to Warp's internal systems. No webview interop. Study the Entity-Component-Handle pattern, don't import the crate. |
+| Warp's terminal/editor/core crates | Architecturally incompatible — coupled to WarpUI entity system, not designed for embedding. |
 | crossfont | Alacritty's font rasterizer. Designed for OpenGL, not wgpu. glyphon + cosmic-text is the wgpu-native path. |
 | Iced | Full framework that would fight with the hybrid architecture. Brings its own windowing, rendering, and event system. |
 | egui | Immediate mode UI framework. Wrong paradigm for a hybrid GPU+webview app. Good for debug tools, not for the app itself. |

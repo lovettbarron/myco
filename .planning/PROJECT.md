@@ -60,7 +60,7 @@ The project folder is the context surface. Sketch an idea on the canvas, it's a 
 **Technical research findings**:
 - Warp's stack: Rust + custom GPU UI framework (WarpUI, MIT) + Metal/wgpu + forked alacritty VTE. 60+ crates, >144 FPS rendering, ~1.9ms screen redraw
 - Embedding webviews in GPU-rendered Rust apps is feasible via wry (Tauri's crate). Webviews are native overlays (WKWebView on macOS), not composited into the GPU pipeline. Known keyboard focus routing issues between GPU surface and webviews
-- AGPL on Warp's terminal code means clean-room approach required. alacritty_terminal (Apache-2.0/MIT) is the alternative for VTE/terminal state
+- Warp's terminal crate is architecturally incompatible (coupled to WarpUI entity system, no webview interop). alacritty_terminal is the better embeddable library regardless of licensing
 - Text rendering is the biggest time sink in custom GPU rendering (font shaping, ligatures, emoji)
 
 **User context**: Developer is a PM at LEGO based in Denmark, intermediate Rust experience, builds AI-assisted applications. TypeScript is the default stack but Rust is a deliberate strategic choice here for performance and the learning investment. Has Apple developer account for signing/distribution.
@@ -69,7 +69,7 @@ The project folder is the context surface. Sketch an idea on the canvas, it's a 
 
 - **Stack**: Rust + wgpu (GPU rendering) + wry (webview embedding) + alacritty_terminal (VTE/PTY). No Electron
 - **Platform**: macOS first. Architecture must support Linux portability (wgpu + wry both support Linux, but macOS-specific optimizations like Metal are acceptable)
-- **Licensing**: Cannot use Warp's AGPL code (terminal, editor, core). Can use WarpUI (MIT) and forked deps (Apache-2.0). Clean-room approach for any patterns inspired by AGPL crates
+- **Licensing**: AGPL-3.0. Warp's AGPL crates are license-compatible but architecturally incompatible (tightly coupled to Warp's internal systems, no webview interop). alacritty_terminal chosen for technical fit, not license avoidance
 - **Config format**: JSON for .myco project files and ~/.myco global config
 - **Distribution**: DMG with code signing and notarization via Apple Developer account
 - **Solo developer**: Architecture decisions must be realistic for one person. Prioritize shipping a usable core loop over comprehensive features
@@ -81,7 +81,7 @@ The project folder is the context surface. Sketch an idea on the canvas, it's a 
 |----------|-----------|---------|
 | Rust + wgpu over Electron | Strategic bet on performance and the Rust ecosystem. 4-5x more dev time but produces a qualitatively different product (30-40 MB memory vs 500+ MB, GPU-accelerated rendering). Aligns with Warp/Zed direction | — Pending |
 | Hybrid GPU + webview architecture | Terminal and layout engine GPU-rendered for performance where it matters. TLDraw, browser, markdown via wry webviews because they're inherently web content. Pragmatic middle ground | — Pending |
-| alacritty_terminal over Warp's terminal code | Warp's terminal crate is AGPL and tightly coupled. alacritty_terminal is Apache-2.0, battle-tested, and modular | — Pending |
+| alacritty_terminal over Warp's terminal code | Warp's terminal crate is tightly coupled to WarpUI's entity system and has no webview interop path. alacritty_terminal is designed as an embeddable library, battle-tested (Alacritty, COSMIC Terminal, Zed) | — Pending |
 | JSON config over TOML | Universal readability — any AI tool or script can parse JSON. Trades Rust-ecosystem convention for broader tooling compatibility | — Pending |
 | Project folder as context surface (thesis) | The bet: AI-native tools should treat the folder as persistent context, not ephemeral chat. This is the product thesis to validate | — Pending |
 | Open source from the start | Strategic bet on category definition. If "project as context" is a real insight, open source accelerates adoption and validation | — Pending |
