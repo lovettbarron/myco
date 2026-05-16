@@ -1257,9 +1257,12 @@ impl ApplicationHandler for App {
         const FRAME_BUDGET: Duration = Duration::from_millis(16); // ~60fps
 
         // Drain terminal events and update cursor blinks
+        let mut needs_redraw = false;
         if let Some(tm) = &mut self.terminal_manager {
             tm.drain_all_events();
-            tm.update_all_cursor_blinks();
+            if tm.update_all_cursor_blinks() {
+                needs_redraw = true;
+            }
             for ts in tm.terminals_mut().values_mut() {
                 ts.clear_expired_flash();
             }
@@ -1267,10 +1270,16 @@ impl ApplicationHandler for App {
 
         let now = Instant::now();
         if now >= self.next_frame {
-            self.next_frame = now + FRAME_BUDGET;
+            needs_redraw = true;
+        }
+
+        if needs_redraw {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
+            // Schedule next frame from NOW, not from the old deadline —
+            // prevents perpetual catch-up when frames take longer than budget.
+            self.next_frame = Instant::now() + FRAME_BUDGET;
         }
         event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(self.next_frame));
     }
