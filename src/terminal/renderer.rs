@@ -549,7 +549,10 @@ impl TerminalRenderer {
         viewport_y: f32,
         viewport_w: f32,
     ) -> Vec<QuadInstance> {
-        let bar_width = 250.0_f32.min(viewport_w - 20.0);
+        let bar_width = 250.0_f32.min(viewport_w - 20.0).max(0.0);
+        if bar_width <= 0.0 {
+            return vec![];
+        }
         let bar_x = viewport_x + viewport_w - bar_width - 10.0;
         let bar_y = viewport_y + 5.0;
 
