@@ -1,0 +1,231 @@
+//! Terminal state wrapping alacritty_terminal's Term in an Arc<FairMutex>.
+//!
+//! Manages the PTY lifecycle, event draining, and cursor blink state.
+
+use std::borrow::Cow;
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use alacritty_terminal::event::WindowSize;
+use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::term::{Config as TermConfig, Term};
+use alacritty_terminal::tty;
+use tracing::{debug, warn};
+
+use super::event_listener::MycoEventListener;
+
+/// Dimensions struct implementing alacritty_terminal's Dimensions trait.
+///
+/// Used for Term creation and resize operations.
+#[derive(Debug, Clone, Copy)]
+pub struct TermDimensions {
+    pub cols: usize,
+    pub rows: usize,
+}
+
+impl Dimensions for TermDimensions {
+    fn total_lines(&self) -> usize {
+        self.rows
+    }
+
+    fn screen_lines(&self) -> usize {
+        self.rows
+    }
+
+    fn columns(&self) -> usize {
+        self.cols
+    }
+}
+
+/// State for a single terminal instance.
+///
+/// Wraps the alacritty_terminal Term in an Arc<FairMutex> for thread-safe access,
+/// and manages the PTY event loop, event channel, and cursor blink state.
+pub struct TerminalState {
+    /// Thread-safe terminal grid state.
+    pub term: Arc<FairMutex<Term<MycoEventListener>>>,
+    /// Channel to write data to the PTY via the background event loop.
+    pub event_loop_sender: EventLoopSender,
+    /// Receiver for events from the background thread (Wakeup, Exit, etc.)
+    event_rx: mpsc::Receiver<alacritty_terminal::event::Event>,
+    /// Handle to the background event loop thread.
+    _event_loop_handle: JoinHandle<(EventLoop<tty::Pty, MycoEventListener>, alacritty_terminal::event_loop::State)>,
+    /// Whether the shell process has exited.
+    pub exited: bool,
+    /// Exit code if the process has exited.
+    pub exit_code: Option<i32>,
+    /// Cell width in pixels (computed from font metrics).
+    pub cell_width: f32,
+    /// Cell height in pixels (computed from font metrics).
+    pub cell_height: f32,
+    /// Current font size in points.
+    pub font_size: f32,
+    /// Whether the cursor is currently visible in the blink cycle.
+    pub cursor_blink_visible: bool,
+    /// Timestamp of the last cursor blink toggle.
+    cursor_blink_last_toggle: Instant,
+    /// Whether cursor blinking is enabled (programs can toggle via escape sequences).
+    pub cursor_blink_enabled: bool,
+}
+
+impl TerminalState {
+    /// Create a new terminal with the given dimensions and working directory.
+    ///
+    /// Spawns the user's $SHELL (fallback /bin/zsh on macOS) in the given directory.
+    /// The background event loop thread handles all PTY I/O.
+    pub fn new(
+        cols: usize,
+        rows: usize,
+        working_dir: &std::path::Path,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Per D-12: 50K line scrollback
+        let config = TermConfig {
+            scrolling_history: 50_000,
+            ..TermConfig::default()
+        };
+
+        // Create event channel for background -> main thread communication
+        let (event_tx, event_rx) = mpsc::channel();
+        let event_listener = MycoEventListener::new(event_tx);
+
+        // Create terminal grid state
+        let dims = TermDimensions { cols, rows };
+        let term = Term::new(config, &dims, event_listener.clone());
+        let term = Arc::new(FairMutex::new(term));
+
+        // Default font metrics (will be updated after font system is available)
+        let font_size = 14.0_f32;
+        let cell_width = font_size * 0.6;
+        let cell_height = font_size * 1.3;
+
+        // Create PTY with user's shell
+        // Per D-01: detect $SHELL, fallback to /bin/zsh
+        // Per D-02: working directory is the project folder
+        // Per D-04: inherits full parent environment automatically
+        let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let pty_config = tty::Options {
+            shell: Some(tty::Shell::new(shell_path, vec![])),
+            working_directory: Some(working_dir.to_path_buf()),
+            ..Default::default()
+        };
+
+        let window_size = WindowSize {
+            num_lines: rows as u16,
+            num_cols: cols as u16,
+            cell_width: cell_width as u16,
+            cell_height: cell_height as u16,
+        };
+
+        let pty = tty::new(&pty_config, window_size, 0)?;
+
+        // Create and spawn the background event loop
+        let event_loop = EventLoop::new(
+            term.clone(),
+            event_listener,
+            pty,
+            false, // drain_on_exit
+            false, // ref_test
+        )?;
+        let event_loop_sender = event_loop.channel();
+        let event_loop_handle = event_loop.spawn();
+
+        debug!("Terminal created: {}x{} in {:?}", cols, rows, working_dir);
+
+        Ok(Self {
+            term,
+            event_loop_sender,
+            event_rx,
+            _event_loop_handle: event_loop_handle,
+            exited: false,
+            exit_code: None,
+            cell_width,
+            cell_height,
+            font_size,
+            cursor_blink_visible: true,
+            cursor_blink_last_toggle: Instant::now(),
+            cursor_blink_enabled: true, // Per D-08: blink by default
+        })
+    }
+
+    /// Drain all pending events from the background thread.
+    ///
+    /// Called in the main thread's about_to_wait handler.
+    /// Handles terminal events like exit, cursor blink changes, etc.
+    pub fn drain_events(&mut self) {
+        while let Ok(event) = self.event_rx.try_recv() {
+            match event {
+                alacritty_terminal::event::Event::Exit => {
+                    debug!("Terminal: Exit event received");
+                    self.exited = true;
+                }
+                alacritty_terminal::event::Event::ChildExit(status) => {
+                    debug!("Terminal: ChildExit event received: {:?}", status);
+                    self.exited = true;
+                    self.exit_code = status.code();
+                }
+                alacritty_terminal::event::Event::CursorBlinkingChange => {
+                    // Read the authoritative blink state from CursorStyle
+                    let term = self.term.lock();
+                    self.cursor_blink_enabled = term.cursor_style().blinking;
+                    debug!(
+                        "Terminal: CursorBlinkingChange, enabled={}",
+                        self.cursor_blink_enabled
+                    );
+                }
+                alacritty_terminal::event::Event::Wakeup => {
+                    // Terminal content changed, redraw needed
+                    // (request_redraw already happens in about_to_wait)
+                }
+                alacritty_terminal::event::Event::Title(title) => {
+                    debug!("Terminal: Title changed to {:?}", title);
+                    // TODO: Update panel title in future
+                }
+                other => {
+                    debug!("Terminal: Unhandled event: {:?}", other);
+                }
+            }
+        }
+    }
+
+    /// Update cursor blink state based on elapsed time.
+    ///
+    /// Returns true if the visibility state changed (needs redraw).
+    /// Toggles every 500ms when blinking is enabled.
+    pub fn update_cursor_blink(&mut self) -> bool {
+        if !self.cursor_blink_enabled {
+            if !self.cursor_blink_visible {
+                self.cursor_blink_visible = true;
+                return true;
+            }
+            return false;
+        }
+
+        if self.cursor_blink_last_toggle.elapsed() >= Duration::from_millis(500) {
+            self.cursor_blink_visible = !self.cursor_blink_visible;
+            self.cursor_blink_last_toggle = Instant::now();
+            return true;
+        }
+
+        false
+    }
+
+    /// Reset cursor blink to visible state (called when user types).
+    pub fn reset_cursor_blink(&mut self) {
+        self.cursor_blink_visible = true;
+        self.cursor_blink_last_toggle = Instant::now();
+    }
+
+    /// Write bytes to the PTY via the event loop sender.
+    pub fn write_to_pty(&self, bytes: &[u8]) {
+        if let Err(e) = self
+            .event_loop_sender
+            .send(Msg::Input(Cow::Owned(bytes.to_vec())))
+        {
+            warn!("Failed to write to PTY: {}", e);
+        }
+    }
+}

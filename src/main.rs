@@ -3,6 +3,7 @@ mod grid;
 mod input;
 mod platform;
 mod renderer;
+mod terminal;
 mod theme;
 mod window;
 
