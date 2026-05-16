@@ -179,17 +179,17 @@ impl TextEngine {
             });
         }
 
-        self.text_renderer
-            .prepare(
-                device,
-                queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                &self.viewport,
-                text_areas,
-                &mut self.swash_cache,
-            )
-            .unwrap();
+        if let Err(e) = self.text_renderer.prepare(
+            device,
+            queue,
+            &mut self.font_system,
+            &mut self.atlas,
+            &self.viewport,
+            text_areas,
+            &mut self.swash_cache,
+        ) {
+            tracing::warn!("Text prepare failed: {:?}", e);
+        }
     }
 
     /// Render prepared text in the given render pass.
@@ -197,8 +197,8 @@ impl TextEngine {
     /// Must be called after `prepare()` within the same frame.
     /// Text renders ON TOP of quads when called after quad_renderer.render().
     pub fn render<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>) {
-        self.text_renderer
-            .render(&self.atlas, &self.viewport, pass)
-            .unwrap();
+        if let Err(e) = self.text_renderer.render(&self.atlas, &self.viewport, pass) {
+            tracing::warn!("Text render failed: {:?}", e);
+        }
     }
 }
