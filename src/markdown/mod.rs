@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::grid::PanelId;
 
-pub use parser::{parse_markdown_to_blocks, BlockType, MarkdownBlock};
+pub use parser::{parse_markdown_to_blocks, MarkdownBlock};
 pub use renderer::MarkdownRenderer;
 
 /// Per-panel markdown viewer state.

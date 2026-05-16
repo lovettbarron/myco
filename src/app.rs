@@ -30,6 +30,7 @@ use crate::renderer::quad_renderer::QuadInstance;
 use crate::renderer::text_renderer::TextLabel;
 use crate::renderer::Renderer;
 use crate::canvas::CanvasManager;
+use crate::markdown::{MarkdownManager, MarkdownRenderer};
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
 use crate::theme::Theme;
@@ -114,8 +115,12 @@ pub struct App {
     terminal_manager: Option<TerminalManager>,
     /// Manages all canvas (TLDraw webview) instances.
     canvas_manager: Option<CanvasManager>,
+    /// Manages all markdown viewer instances.
+    markdown_manager: Option<MarkdownManager>,
     /// GPU terminal renderer (snapshot + buffer building, quad generation).
     terminal_renderer: TerminalRenderer,
+    /// GPU markdown renderer (buffer caching, quad generation for code blocks/blockquotes/HRs).
+    markdown_renderer: crate::markdown::renderer::MarkdownRenderer,
     /// Proxy for waking the event loop from background threads.
     proxy: Option<EventLoopProxy<UserEvent>>,
     /// Pending actions to process after the current action completes.
@@ -145,8 +150,10 @@ impl App {
             modifiers: ModifiersState::empty(),
             terminal_manager: None,
             canvas_manager: None,
+            markdown_manager: Some(MarkdownManager::new()),
             pending_actions: Vec::new(),
             terminal_renderer: TerminalRenderer::new(),
+            markdown_renderer: crate::markdown::renderer::MarkdownRenderer::new(),
             proxy: Some(proxy),
             redraw_pending: false,
             frame_stats: FrameStats::new(),
@@ -233,6 +240,11 @@ impl App {
                 if let Some(cm) = &mut self.canvas_manager {
                     cm.destroy_canvas(&panel_id);
                 }
+                // Destroy markdown viewer if this is a markdown panel
+                if let Some(mm) = &mut self.markdown_manager {
+                    mm.destroy_markdown(&panel_id);
+                }
+                self.markdown_renderer.invalidate_panel_cache(&panel_id);
                 if let Some(grid) = self.grid.as_mut() {
                     if operations::close_panel(grid, panel_id) {
                         self.panels.retain(|p| p.id != panel_id);
@@ -698,15 +710,65 @@ impl App {
                 }
             }
 
-            // === Markdown actions (Phase 3, Plan 02) ===
-            InputAction::OpenMarkdown { path: _ } => {
-                // Implemented in Plan 02
+            // === Markdown actions ===
+            InputAction::OpenMarkdown { path } => {
+                // D-12: Smart placement -- reuse existing markdown panel or split focused
+                let existing_md_panel = self
+                    .panels
+                    .iter()
+                    .find(|p| p.panel_type == PanelType::Markdown)
+                    .map(|p| p.id);
+
+                if let Some(md_id) = existing_md_panel {
+                    // Replace content in existing markdown panel
+                    if let Some(mm) = &mut self.markdown_manager {
+                        mm.destroy_markdown(&md_id);
+                        let _ = mm.create_markdown(md_id, path.clone());
+                    }
+                    self.markdown_renderer.invalidate_panel_cache(&md_id);
+                    // Update panel title
+                    if let Some(panel) = self.panels.iter_mut().find(|p| p.id == md_id) {
+                        panel.title = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "Markdown".into());
+                        panel.file_path = Some(path);
+                    }
+                    self.focused_panel = Some(md_id);
+                } else {
+                    // Split focused panel to create new markdown panel
+                    if let Some(focused_id) = self.focused_panel {
+                        if let Some(grid) = self.grid.as_mut() {
+                            if let Some(new_id) = operations::split_panel(
+                                grid,
+                                focused_id,
+                                SplitDirection::Horizontal,
+                            ) {
+                                let panel = Panel::new_markdown(new_id, path.clone());
+                                self.panels.push(panel);
+                                self.focused_panel = Some(new_id);
+                                self.recompute_layout();
+                                if let Some(mm) = &mut self.markdown_manager {
+                                    let _ = mm.create_markdown(new_id, path);
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            InputAction::MarkdownScroll { panel_id: _, delta: _ } => {
-                // Implemented in Plan 02
+            InputAction::MarkdownScroll { panel_id, delta } => {
+                // Compute bounds before borrowing markdown_manager mutably
+                let viewport_h = self.panel_content_bounds(panel_id).3;
+                if let Some(mm) = &mut self.markdown_manager {
+                    if let Some(state) = mm.get_mut(&panel_id) {
+                        state.scroll(delta, viewport_h);
+                    }
+                }
             }
-            InputAction::MarkdownFileChanged { path: _ } => {
-                // Implemented in Plan 02
+            InputAction::MarkdownFileChanged { path } => {
+                if let Some(mm) = &mut self.markdown_manager {
+                    mm.handle_file_changed(&[path]);
+                }
             }
 
             // === Sidebar actions (Phase 3, Plan 03) ===
@@ -965,6 +1027,31 @@ impl App {
                         }
                     }
                 }
+
+                // Markdown-specific quads (code block backgrounds, blockquote borders, HRs)
+                if panel.panel_type == PanelType::Markdown {
+                    if let Some(mm) = &self.markdown_manager {
+                        if let Some(state) = mm.get(&panel_id) {
+                            let (vx, vy, vw, vh) = (
+                                px,
+                                py_offset + PANEL_TITLE_HEIGHT,
+                                pw,
+                                ph - PANEL_TITLE_HEIGHT,
+                            );
+                            let md_quads = MarkdownRenderer::build_quads(
+                                &state.blocks,
+                                &state.block_heights,
+                                state.scroll_offset,
+                                vx,
+                                vy,
+                                vw,
+                                vh,
+                                &self.theme,
+                            );
+                            quads.extend(md_quads);
+                        }
+                    }
+                }
             }
         }
 
@@ -1042,9 +1129,14 @@ impl App {
             let py_offset = py + TITLE_BAR_HEIGHT;
 
             if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
-                // Panel title bar label
+                // Panel title bar label (show title for markdown, type for others)
+                let title_text = if panel.panel_type == PanelType::Markdown {
+                    panel.title.clone()
+                } else {
+                    panel.panel_type.to_string()
+                };
                 labels.push(TextLabel {
-                    text: panel.panel_type.to_string(),
+                    text: title_text,
                     x: px + 8.0,
                     y: py_offset + 4.0,
                     width: pw - 60.0,
@@ -1166,8 +1258,9 @@ impl App {
                             // Terminal text is rendered via terminal_renderer, not labels
                         }
                     }
-                } else {
-                    // Centered type label in panel body (D-03) for non-terminal panels
+                } else if panel.panel_type != PanelType::Markdown {
+                    // Centered type label in panel body (D-03) for non-terminal, non-markdown panels
+                    // Markdown panels render their own content via markdown_renderer
                     let center_y = py_offset + ph / 2.0 - 7.0;
                     labels.push(TextLabel {
                         text: panel.title.clone(),
@@ -1201,8 +1294,11 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::CanvasMessage(panel_id, msg) => {
                 self.process_action(InputAction::CanvasIpcMessage { panel_id, message: msg });
             }
-            UserEvent::FileChanged(_paths) => {
-                // Handled in Plan 02 (markdown)
+            UserEvent::FileChanged(paths) => {
+                if let Some(mm) = &mut self.markdown_manager {
+                    mm.handle_file_changed(&paths);
+                }
+                // Note: sidebar file tree refresh will be added in Plan 03
             }
         }
         // Drain pending actions (from IPC shortcut forwarding)
@@ -1504,12 +1600,13 @@ impl ApplicationHandler<UserEvent> for App {
                         })
                         .collect();
 
-                    // Phase 1: Update terminal buffer caches (only reshapes changed rows)
+                    // Phase 1: Update terminal and markdown buffer caches
                     if let Some(renderer) = &mut self.renderer {
+                        let font_system = renderer.text_engine_mut().font_system_mut();
+
+                        // Terminal buffer cache update (only reshapes changed rows)
                         if let Some(tm) = &self.terminal_manager {
                             if let Some(grid) = &self.grid {
-                                let font_system =
-                                    renderer.text_engine_mut().font_system_mut();
                                 let _prep_span = tracing::trace_span!("prepare_terminal_text").entered();
                                 for &(node, panel_id) in grid.panel_nodes() {
                                     if let Some(ts) = tm.get(&panel_id) {
@@ -1540,10 +1637,46 @@ impl ApplicationHandler<UserEvent> for App {
                                 drop(_prep_span);
                             }
                         }
+
+                        // Markdown buffer cache update
+                        if let (Some(mm), Some(grid)) = (&mut self.markdown_manager, &self.grid) {
+                            let _md_span = tracing::trace_span!("prepare_markdown_text").entered();
+                            for &(node, panel_id) in grid.panel_nodes() {
+                                let is_markdown = self
+                                    .panels
+                                    .iter()
+                                    .any(|p| p.id == panel_id && p.panel_type == PanelType::Markdown);
+                                if is_markdown {
+                                    if let Some(state) = mm.get_mut(&panel_id) {
+                                        let (px, py, pw, ph) = grid.get_panel_rect(node);
+                                        let content_y = py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+                                        let content_h = ph - PANEL_TITLE_HEIGHT;
+
+                                        let dirty = state.dirty;
+                                        self.markdown_renderer.update_cache(
+                                            panel_id,
+                                            font_system,
+                                            &state.blocks,
+                                            &state.block_heights,
+                                            state.scroll_offset,
+                                            px,
+                                            content_y,
+                                            pw,
+                                            content_h,
+                                            dirty,
+                                        );
+                                        state.dirty = false;
+                                    }
+                                }
+                            }
+                            drop(_md_span);
+                        }
                     }
 
                     // Phase 2: Collect cached TextAreas and render
-                    let terminal_text_areas = self.terminal_renderer.collect_text_areas(s);
+                    let mut terminal_text_areas = self.terminal_renderer.collect_text_areas(s);
+                    // Append markdown text areas to the same vec
+                    terminal_text_areas.extend(self.markdown_renderer.collect_text_areas(s));
 
                     if let Some(renderer) = &mut self.renderer {
                         match renderer.render(

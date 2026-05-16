@@ -342,14 +342,27 @@ impl MouseState {
         if let Some(panel_id) =
             find_panel_at(grid, self.cursor_x as f32, self.cursor_y as f32, title_bar_height)
         {
-            if let Some(PanelType::Terminal) = panel_types(panel_id) {
-                let lines = delta_lines as i32;
-                if lines != 0 {
-                    actions.push(InputAction::TerminalScroll {
-                        panel_id,
-                        delta: lines,
-                    });
+            match panel_types(panel_id) {
+                Some(PanelType::Terminal) => {
+                    let lines = delta_lines as i32;
+                    if lines != 0 {
+                        actions.push(InputAction::TerminalScroll {
+                            panel_id,
+                            delta: lines,
+                        });
+                    }
                 }
+                Some(PanelType::Markdown) => {
+                    // Convert line delta to pixel delta (approx 21px per line)
+                    let pixel_delta = delta_lines * 21.0;
+                    if pixel_delta.abs() > 0.01 {
+                        actions.push(InputAction::MarkdownScroll {
+                            panel_id,
+                            delta: pixel_delta,
+                        });
+                    }
+                }
+                _ => {}
             }
         }
 
