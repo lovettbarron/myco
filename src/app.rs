@@ -1081,9 +1081,12 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
+                // Negate for natural scrolling convention: on macOS with natural
+                // scrolling, positive y means "scroll down" (content moves up),
+                // but positive delta to TerminalScroll means "scroll up/back".
                 let lines = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(_, y) => (y * 3.0) as i32,
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => (pos.y / 20.0) as i32,
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => -(y * 3.0) as i32,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as i32,
                 };
                 if lines != 0 {
                     if let Some(grid) = &self.grid {
