@@ -5,6 +5,7 @@ mod input;
 mod markdown;
 mod platform;
 mod renderer;
+mod sidebar;
 mod terminal;
 mod theme;
 mod watcher;
