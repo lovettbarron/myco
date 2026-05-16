@@ -12,12 +12,12 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **TERM-01**: User can open a fully functional terminal (bash, zsh, fish) with PTY support via alacritty_terminal
 - [x] **TERM-02**: Terminal renders true color (24-bit) correctly for tools like vim, bat, and neovim themes
 - [x] **TERM-03**: Terminal renders Unicode text including CJK characters and combining characters correctly
-- [ ] **TERM-04**: User can scroll back through terminal output (configurable buffer, default 10K lines)
-- [ ] **TERM-05**: User can search within terminal scrollback with highlighted matches
-- [ ] **TERM-06**: User can copy and paste text using macOS conventions (Cmd+C/V), with markdown-friendly copy behavior
+- [x] **TERM-04**: User can scroll back through terminal output (configurable buffer, default 10K lines)
+- [x] **TERM-05**: User can search within terminal scrollback with highlighted matches
+- [x] **TERM-06**: User can copy and paste text using macOS conventions (Cmd+C/V), with markdown-friendly copy behavior
 - [x] **TERM-07**: User can configure terminal font (supports JetBrains Mono, Fira Code, etc.) and resize with Cmd+/Cmd-
 - [x] **TERM-08**: Terminal supports cursor style switching (block, beam, underline) via VTE escape sequences
-- [ ] **TERM-09**: User can select text in the terminal via mouse (line selection and rectangular selection)
+- [x] **TERM-09**: User can select text in the terminal via mouse (line selection and rectangular selection)
 
 ### Grid Layout
 
@@ -146,12 +146,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TERM-01 | Phase 2 | Complete |
 | TERM-02 | Phase 2 | Complete |
 | TERM-03 | Phase 2 | Complete |
-| TERM-04 | Phase 2 | Pending |
-| TERM-05 | Phase 2 | Pending |
-| TERM-06 | Phase 2 | Pending |
+| TERM-04 | Phase 2 | Complete |
+| TERM-05 | Phase 2 | Complete |
+| TERM-06 | Phase 2 | Complete |
 | TERM-07 | Phase 2 | Complete |
 | TERM-08 | Phase 2 | Complete |
-| TERM-09 | Phase 2 | Pending |
+| TERM-09 | Phase 2 | Complete |
 | CAP-01 | Phase 3 | Pending |
 | CAP-02 | Phase 3 | Pending |
 | CAP-03 | Phase 3 | Pending |

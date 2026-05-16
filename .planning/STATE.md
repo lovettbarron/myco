@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-05-16T06:04:12.646Z"
-last_activity: 2026-05-16 -- Phase 2 planning complete
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-05-16T06:20:23.728Z"
+last_activity: 2026-05-16
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 5
-  percent: 83
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 ## Current Position
 
 Phase: 2
-Plan: 1 of 2 complete
-Status: Executing
-Last activity: 2026-05-16 -- Completed 02-01 (Working Terminal Core)
+Plan: 2 of 2 complete
+Status: Ready to execute
+Last activity: 2026-05-16
 
-Progress: [████████░░] 83%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [████████░░] 83%
 | Phase 01 P02 | 7 min | 2 tasks | 8 files |
 | Phase 01 P03 | 13 | 2 tasks | 9 files |
 | Phase 02 P01 | 45 min | 3 tasks | 16 files |
+| Phase 02 P02 | 12 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,9 @@ Recent decisions affecting current work:
 - [02-01]: cosmic-text accessed via glyphon::cosmic_text re-export, not direct dependency
 - [02-01]: Snapshot pattern: lock Term briefly, copy cells, build GPU data without lock
 - [02-01]: TermMode::empty() for keyboard translation -- full mode reading deferred to 02-02
+- [02-02]: regex_syntax::escape is the correct path (not regex_automata::util::syntax::escape)
+- [02-02]: alacritty_terminal::index::Side (not selection::Side) for Selection new/update
+- [02-02]: Dimensions trait must be imported to call screen_lines()/history_size() on Term
 
 ### Pending Todos
 
@@ -102,6 +106,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T06:22:04Z
+Last session: 2026-05-16T06:20:23.722Z
 Stopped at: Completed 02-01-PLAN.md
-Resume file: .planning/phases/02-terminal-cap/02-02-PLAN.md
+Resume file: None

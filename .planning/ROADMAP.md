@@ -13,7 +13,7 @@ Myco is an AI-native project control surface: a GPU-rendered workspace where ter
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Window, Grid, and Build Pipeline** - Renderable window with resizable grid panels and signed macOS app bundle
-- [ ] **Phase 2: Terminal Cap** - Fully functional terminal emulator in a grid cell
+- [x] **Phase 2: Terminal Cap** - Fully functional terminal emulator in a grid cell (completed 2026-05-16)
 - [ ] **Phase 3: Webview Caps** - TLDraw canvas and Markdown viewer via embedded webviews
 - [ ] **Phase 4: Application Frame and Theming** - Navigation bars, status bars, settings, and theme system
 - [ ] **Phase 5: Configuration and Persistence** - Project config, global config, layout save/restore, keyboard shortcuts
@@ -58,7 +58,7 @@ Plans:
 - [x] 02-01-PLAN.md -- Working terminal core (PTY lifecycle, GPU character rendering, keyboard input, cursor)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 02-02-PLAN.md -- Terminal interaction (scrollback, selection, clipboard, search overlay, font config)
+- [x] 02-02-PLAN.md -- Terminal interaction (scrollback, selection, clipboard, search overlay, font config)
 
 ### Phase 3: Webview Caps
 **Goal**: User can sketch on a canvas and view documents alongside the terminal in the same window
@@ -136,7 +136,7 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Window, Grid, and Build Pipeline | 0/4 | Planning complete | - |
-| 2. Terminal Cap | 1/2 | In Progress|  |
+| 2. Terminal Cap | 2/2 | Complete   | 2026-05-16 |
 | 3. Webview Caps | 0/2 | Not started | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |
 | 5. Configuration and Persistence | 0/2 | Not started | - |
