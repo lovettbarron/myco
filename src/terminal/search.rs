@@ -112,8 +112,14 @@ impl SearchState {
                                 start: match_start,
                                 end: match_end,
                             });
-                            // Move past this match to find the next one
-                            current_pos = Point::new(match_end.line, match_end.column + 1);
+                            // Move past this match to find the next one.
+                            // Guard against column overflow at end of line.
+                            let next_col = match_end.column.0 + 1;
+                            if next_col >= term.columns() {
+                                current_pos = Point::new(Line(match_end.line.0 + 1), Column(0));
+                            } else {
+                                current_pos = Point::new(match_end.line, Column(next_col));
+                            }
                         } else {
                             break;
                         }
