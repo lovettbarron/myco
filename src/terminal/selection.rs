@@ -21,11 +21,14 @@ pub fn pixel_to_point(
     viewport_y: f32,
     cell_width: f32,
     cell_height: f32,
-    _display_offset: usize,
+    display_offset: usize,
 ) -> Point {
     let col = ((x - viewport_x) / cell_width).max(0.0) as usize;
     let row = ((y - viewport_y) / cell_height).max(0.0) as usize;
-    Point::new(Line(row as i32), Column(col))
+    // Convert viewport-relative row to grid-absolute coordinate by
+    // subtracting display_offset. When scrolled back, viewport row 0
+    // corresponds to a negative grid line.
+    Point::new(Line(row as i32 - display_offset as i32), Column(col))
 }
 
 /// Determine the SelectionType from click count and block flag.
