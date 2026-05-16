@@ -118,6 +118,9 @@ pub struct App {
     terminal_renderer: TerminalRenderer,
     /// Proxy for waking the event loop from background threads.
     proxy: Option<EventLoopProxy<UserEvent>>,
+    /// Pending actions to process after the current action completes.
+    /// Used to avoid re-entrancy when forwarding IPC shortcuts.
+    pending_actions: Vec<InputAction>,
     /// Whether a redraw has been requested for the current frame.
     redraw_pending: bool,
     /// Per-frame performance stats, logged every 60 frames at debug level.
@@ -142,6 +145,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             terminal_manager: None,
             canvas_manager: None,
+            pending_actions: Vec::new(),
             terminal_renderer: TerminalRenderer::new(),
             proxy: Some(proxy),
             redraw_pending: false,
@@ -282,7 +286,25 @@ impl App {
                 }
             }
             InputAction::FocusPanel { panel_id } => {
+                let old_focus = self.focused_panel;
                 self.focused_panel = Some(panel_id);
+
+                // Handle webview focus transitions (D-15, D-16)
+                if let Some(cm) = &self.canvas_manager {
+                    // Unfocus previous canvas if it was focused
+                    if let Some(old_id) = old_focus {
+                        if self.panels.iter().any(|p| p.id == old_id && p.panel_type == PanelType::Canvas) {
+                            cm.set_focus(&old_id, false);
+                        }
+                    }
+                    // Focus new canvas if target is a canvas
+                    if self.panels.iter().any(|p| p.id == panel_id && p.panel_type == PanelType::Canvas) {
+                        cm.set_focus(&panel_id, true);
+                    } else {
+                        // Focusing a GPU panel: return focus from any webview to parent window
+                        cm.unfocus_all();
+                    }
+                }
             }
 
             // === Terminal actions ===
@@ -642,14 +664,37 @@ impl App {
                 }
             }
             InputAction::CanvasIpcMessage { panel_id, message } => {
-                if let Some(cm) = &mut self.canvas_manager {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&message) {
-                        if parsed.get("type").and_then(|t| t.as_str()) == Some("shortcut") {
-                            // Forward shortcut to Myco's input system (handled in Task 3)
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&message) {
+                    match parsed.get("type").and_then(|t| t.as_str()) {
+                        Some("shortcut") => {
+                            // D-14: Forward app-level shortcuts from webview back to Myco
+                            let key = parsed.get("key").and_then(|k| k.as_str()).unwrap_or("");
+                            let shift = parsed.get("shift").and_then(|s| s.as_bool()).unwrap_or(false);
+                            // T-03-05: Only translate known shortcut keys
+                            let action = match (key, shift) {
+                                ("w", _) => Some(InputAction::PanelClose { panel_id }),
+                                ("d", false) => Some(InputAction::PanelSplitHorizontal { panel_id }),
+                                ("D", _) | ("d", true) => Some(InputAction::PanelSplitVertical { panel_id }),
+                                ("t", false) => Some(InputAction::CreateTerminal),
+                                ("b", _) => Some(InputAction::ToggleSidebar),
+                                ("]", _) => Some(InputAction::FocusNextPanel),
+                                ("[", _) => Some(InputAction::FocusPrevPanel),
+                                _ => None,
+                            };
+                            if let Some(a) = action {
+                                self.pending_actions.push(a);
+                            }
                             return;
                         }
+                        Some("save") => {
+                            if let Some(cm) = &mut self.canvas_manager {
+                                cm.handle_ipc_message(&panel_id, &message);
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown canvas IPC type from {:?}", panel_id);
+                        }
                     }
-                    cm.handle_ipc_message(&panel_id, &message);
                 }
             }
 
@@ -677,10 +722,24 @@ impl App {
 
             // === Focus cycling (Phase 3) ===
             InputAction::FocusNextPanel => {
-                // Implemented in Task 3
+                if let Some(current) = self.focused_panel {
+                    let panel_ids: Vec<PanelId> = self.panels.iter().map(|p| p.id).collect();
+                    if let Some(idx) = panel_ids.iter().position(|&id| id == current) {
+                        let next_idx = (idx + 1) % panel_ids.len();
+                        let next_id = panel_ids[next_idx];
+                        self.pending_actions.push(InputAction::FocusPanel { panel_id: next_id });
+                    }
+                }
             }
             InputAction::FocusPrevPanel => {
-                // Implemented in Task 3
+                if let Some(current) = self.focused_panel {
+                    let panel_ids: Vec<PanelId> = self.panels.iter().map(|p| p.id).collect();
+                    if let Some(idx) = panel_ids.iter().position(|&id| id == current) {
+                        let prev_idx = if idx == 0 { panel_ids.len() - 1 } else { idx - 1 };
+                        let prev_id = panel_ids[prev_idx];
+                        self.pending_actions.push(InputAction::FocusPanel { panel_id: prev_id });
+                    }
+                }
             }
         }
     }
@@ -1146,6 +1205,10 @@ impl ApplicationHandler<UserEvent> for App {
                 // Handled in Plan 02 (markdown)
             }
         }
+        // Drain pending actions (from IPC shortcut forwarding)
+        while let Some(action) = self.pending_actions.pop() {
+            self.process_action(action);
+        }
         if let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -1510,6 +1573,11 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             _ => {}
+        }
+
+        // Drain pending actions (from IPC shortcut forwarding, focus cycling, etc.)
+        while let Some(action) = self.pending_actions.pop() {
+            self.process_action(action);
         }
     }
 
