@@ -118,10 +118,10 @@ impl TerminalRenderer {
 
         for indexed in content.display_iter {
             let line = indexed.point.line.0;
-            // display_iter uses negative line indices for scrollback
-            // Convert to 0-based row index for our snapshot
-            let row_idx = (line + display_offset as i32) as usize;
-            if row_idx < num_lines {
+            // display_iter yields viewport-relative line indices (0..screen_lines).
+            // No display_offset adjustment needed -- it's already accounted for.
+            let row_idx = line as usize;
+            if line >= 0 && row_idx < num_lines {
                 rows[row_idx].push(SnapshotCell {
                     c: indexed.cell.c,
                     fg: indexed.cell.fg,
@@ -330,7 +330,12 @@ impl TerminalRenderer {
 
         // Cursor quad
         if cursor_visible && snapshot.cursor_shape != CursorShape::Hidden {
-            let cursor_row = snapshot.cursor_point.line.0 as usize;
+            let cursor_line = snapshot.cursor_point.line.0;
+            if cursor_line < 0 || cursor_line as usize >= snapshot.rows.len() {
+                // Cursor is off-screen (in scrollback), don't render it
+                return quads;
+            }
+            let cursor_row = cursor_line as usize;
             let cursor_col = snapshot.cursor_point.column.0;
             let cursor_x = viewport_x + (cursor_col as f32) * self.cell_width;
             let cursor_y = viewport_y + (cursor_row as f32) * self.cell_height;
