@@ -130,8 +130,8 @@ impl TerminalState {
         let window_size = WindowSize {
             num_lines: rows as u16,
             num_cols: cols as u16,
-            cell_width: cell_width as u16,
-            cell_height: cell_height as u16,
+            cell_width: cell_width.round() as u16,
+            cell_height: cell_height.round() as u16,
         };
 
         let pty = tty::new(&pty_config, window_size, 0)?;

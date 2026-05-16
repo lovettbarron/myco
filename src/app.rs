@@ -294,8 +294,8 @@ impl App {
                                     alacritty_terminal::event::WindowSize {
                                         num_lines: rows as u16,
                                         num_cols: cols as u16,
-                                        cell_width: ts.cell_width as u16,
-                                        cell_height: ts.cell_height as u16,
+                                        cell_width: ts.cell_width.round() as u16,
+                                        cell_height: ts.cell_height.round() as u16,
                                     };
                                 let _ = ts.event_loop_sender.send(
                                     alacritty_terminal::event_loop::Msg::Resize(
@@ -548,8 +548,8 @@ impl App {
                     let window_size = alacritty_terminal::event::WindowSize {
                         num_lines: rows as u16,
                         num_cols: cols as u16,
-                        cell_width: ts.cell_width as u16,
-                        cell_height: ts.cell_height as u16,
+                        cell_width: ts.cell_width.round() as u16,
+                        cell_height: ts.cell_height.round() as u16,
                     };
                     let _ = ts.event_loop_sender.send(
                         alacritty_terminal::event_loop::Msg::Resize(window_size),
@@ -1114,12 +1114,18 @@ impl ApplicationHandler for App {
                             .map(|ts| ts.search.is_open())
                     })
                     .unwrap_or(false);
+                let term_mode = self
+                    .focused_panel
+                    .and_then(|pid| self.terminal_manager.as_ref()?.get(&pid))
+                    .map(|ts| *ts.term.lock().mode())
+                    .unwrap_or(alacritty_terminal::term::TermMode::empty());
                 if let Some(action) = keyboard::handle_key_event(
                     &event,
                     &self.modifiers,
                     self.focused_panel,
                     panel_type,
                     search_open,
+                    term_mode,
                 ) {
                     self.process_action(action);
                 }

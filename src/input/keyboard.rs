@@ -22,6 +22,7 @@ pub fn handle_key_event(
     focused_panel: Option<PanelId>,
     panel_type: Option<PanelType>,
     search_open: bool,
+    term_mode: alacritty_terminal::term::TermMode,
 ) -> Option<InputAction> {
     // Only respond to key presses, not releases
     // (winit fires Pressed for both initial press and repeat)
@@ -38,7 +39,7 @@ pub fn handle_key_event(
 
     // Terminal-focused key routing
     if panel_type == Some(PanelType::Terminal) {
-        return handle_terminal_key(event, modifiers, panel_id);
+        return handle_terminal_key(event, modifiers, panel_id, term_mode);
     }
 
     // Non-terminal panel key routing
@@ -53,6 +54,7 @@ fn handle_terminal_key(
     event: &KeyEvent,
     modifiers: &ModifiersState,
     panel_id: PanelId,
+    mode: alacritty_terminal::term::TermMode,
 ) -> Option<InputAction> {
     // Cmd+key shortcuts (intercepted, not sent to PTY)
     if modifiers.super_key() {
@@ -86,7 +88,6 @@ fn handle_terminal_key(
     }
 
     // All other keys: translate to escape sequences for the PTY
-    let mode = alacritty_terminal::term::TermMode::empty(); // TODO: read from terminal state
     if let Some(bytes) = crate::terminal::input::translate_key(
         &event.logical_key,
         modifiers,
