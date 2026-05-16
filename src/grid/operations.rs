@@ -18,42 +18,108 @@ pub enum SplitDirection {
 /// Split a panel, creating a new panel adjacent to it.
 ///
 /// Per D-08: new panels created by splitting an existing panel.
+/// - Horizontal: adds a new column to root (unchanged behavior).
+/// - Vertical: wraps the target panel in a column container (or appends to existing one).
 /// Returns the new PanelId, or None if the panel was not found or max panels reached.
 pub fn split_panel(
     grid: &mut GridLayout,
     panel_id: PanelId,
     direction: SplitDirection,
 ) -> Option<PanelId> {
-    // T-03-02: prevent infinite splits
     if grid.panel_count() >= MAX_PANELS {
         return None;
     }
 
-    // Verify the panel exists
-    let _existing_node = grid.find_node(panel_id)?;
-
+    let existing_node = grid.find_node(panel_id)?;
     let new_panel_id = grid.next_panel_id();
-
-    // Create a new leaf node in the taffy tree
-    let root = grid.root();
-    let new_node = grid.tree_mut().new_leaf(Style::default()).unwrap();
-    grid.tree_mut().add_child(root, new_node).unwrap();
-    grid.add_panel(new_node, new_panel_id);
 
     match direction {
         SplitDirection::Horizontal => {
+            let root = grid.root();
+            let new_node = grid.tree_mut().new_leaf(Style::default()).unwrap();
+            grid.tree_mut().add_child(root, new_node).unwrap();
+            grid.add_panel(new_node, new_panel_id);
+
             let mut cols = grid.get_grid_template_columns();
             cols.push(fr(1.0));
             grid.set_grid_template_columns(cols);
         }
         SplitDirection::Vertical => {
-            let mut rows = grid.get_grid_template_rows();
-            rows.push(fr(1.0));
-            grid.set_grid_template_rows(rows);
+            let parent = grid.parent_of(existing_node);
+            let root = grid.root();
+
+            if let Some(parent_node) = parent {
+                if parent_node != root && grid.is_column_container(parent_node) {
+                    // Already inside a column container — add a row
+                    let new_node = grid.tree_mut().new_leaf(Style::default()).unwrap();
+                    grid.tree_mut().add_child(parent_node, new_node).unwrap();
+                    grid.add_panel(new_node, new_panel_id);
+
+                    let mut style = grid.tree().style(parent_node).unwrap().clone();
+                    let mut rows: Vec<_> = style.grid_template_rows.clone().into_iter().collect();
+                    rows.push(fr(1.0));
+                    style.grid_template_rows = rows.into_iter().collect();
+                    grid.tree_mut().set_style(parent_node, style).unwrap();
+                } else {
+                    // Direct child of root — create a new column container
+                    create_column_container(grid, existing_node, new_panel_id);
+                }
+            } else {
+                create_column_container(grid, existing_node, new_panel_id);
+            }
         }
     }
 
     Some(new_panel_id)
+}
+
+/// Create a column container that wraps `existing_node` and a new panel.
+fn create_column_container(grid: &mut GridLayout, existing_node: NodeId, new_panel_id: PanelId) {
+    let root = grid.root();
+
+    // Find the position of existing_node among root's children
+    let children = grid.tree().children(root).unwrap();
+    let child_index = children.iter().position(|&c| c == existing_node).unwrap();
+
+    // Remove existing_node from root
+    grid.tree_mut().remove_child(root, existing_node).unwrap();
+
+    // Create the new panel leaf
+    let new_node = grid.tree_mut().new_leaf(Style::default()).unwrap();
+    grid.add_panel(new_node, new_panel_id);
+
+    // Create column container (Grid, 1 col, 2 rows)
+    let container = grid
+        .tree_mut()
+        .new_with_children(
+            Style {
+                display: Display::Grid,
+                size: Size {
+                    width: percent(1.0),
+                    height: percent(1.0),
+                },
+                grid_template_columns: vec![fr(1.0)],
+                grid_template_rows: vec![fr(1.0), fr(1.0)],
+                ..Default::default()
+            },
+            &[existing_node, new_node],
+        )
+        .unwrap();
+
+    grid.add_column_container(container);
+
+    // Insert container at the same position in root
+    let mut current_children = grid.tree().children(root).unwrap();
+    current_children.insert(child_index, container);
+    // Replace root's children
+    let root_node = grid.root();
+    let existing_children = grid.tree().children(root_node).unwrap();
+    for child in existing_children {
+        let _ = grid.tree_mut().remove_child(root_node, child);
+    }
+    for &child in &current_children {
+        grid.tree_mut().add_child(root_node, child).unwrap();
+    }
 }
 
 /// Close a panel and have its neighbor absorb the space.
@@ -61,7 +127,6 @@ pub fn split_panel(
 /// Per D-09: neighbor with the most shared edge absorbs space.
 /// Returns true if closed, false if it's the last panel (can't close).
 pub fn close_panel(grid: &mut GridLayout, panel_id: PanelId) -> bool {
-    // Can't close the last panel
     if grid.panel_count() <= 1 {
         return false;
     }
@@ -71,8 +136,66 @@ pub fn close_panel(grid: &mut GridLayout, panel_id: PanelId) -> bool {
         None => return false,
     };
 
-    // Determine the column index of this panel among children
-    let children = grid.tree().children(grid.root()).unwrap();
+    let parent = grid.parent_of(node);
+    let root = grid.root();
+
+    if let Some(parent_node) = parent {
+        if parent_node != root && grid.is_column_container(parent_node) {
+            // Panel is inside a column container
+            let siblings = grid.tree().children(parent_node).unwrap();
+            let child_index = match siblings.iter().position(|&c| c == node) {
+                Some(i) => i,
+                None => return false,
+            };
+
+            // Remove row track from the container
+            let mut style = grid.tree().style(parent_node).unwrap().clone();
+            let mut rows: Vec<_> = style.grid_template_rows.clone().into_iter().collect();
+            if child_index < rows.len() {
+                rows.remove(child_index);
+            }
+
+            // Remove the node
+            grid.tree_mut().remove_child(parent_node, node).unwrap();
+            grid.tree_mut().remove(node).unwrap();
+            grid.remove_panel(panel_id);
+
+            // If only one child remains, unwrap the container
+            let remaining = grid.tree().children(parent_node).unwrap();
+            if remaining.len() == 1 {
+                let survivor = remaining[0];
+                // Find container's position in root
+                let root_children = grid.tree().children(root).unwrap();
+                let container_index = root_children.iter().position(|&c| c == parent_node).unwrap();
+
+                // Remove survivor from container, remove container from root
+                grid.tree_mut().remove_child(parent_node, survivor).unwrap();
+                grid.tree_mut().remove_child(root, parent_node).unwrap();
+                grid.tree_mut().remove(parent_node).unwrap();
+                grid.remove_column_container(parent_node);
+
+                // Insert survivor at the container's old position
+                let mut new_root_children = grid.tree().children(root).unwrap();
+                new_root_children.insert(container_index, survivor);
+                let current = grid.tree().children(root).unwrap();
+                for child in current {
+                    let _ = grid.tree_mut().remove_child(root, child);
+                }
+                for &child in &new_root_children {
+                    grid.tree_mut().add_child(root, child).unwrap();
+                }
+            } else {
+                // Update the container's row template
+                style.grid_template_rows = rows.into_iter().collect();
+                grid.tree_mut().set_style(parent_node, style).unwrap();
+            }
+
+            return true;
+        }
+    }
+
+    // Panel is a direct child of root (or root child that is a container — shouldn't happen for panels)
+    let children = grid.tree().children(root).unwrap();
     let child_index = match children.iter().position(|&c| c == node) {
         Some(i) => i,
         None => return false,
@@ -81,24 +204,19 @@ pub fn close_panel(grid: &mut GridLayout, panel_id: PanelId) -> bool {
     let num_cols = grid.get_grid_template_columns().len();
     let num_rows = grid.get_grid_template_rows().len();
 
-    // For a simple grid where each child maps to a column (single-row case)
-    // or a row (single-column case), remove the corresponding track.
     if num_rows == 1 && num_cols > 1 {
-        // Column-based layout: remove the column track
         let mut cols = grid.get_grid_template_columns();
         if child_index < cols.len() {
             cols.remove(child_index);
         }
         grid.set_grid_template_columns(cols);
     } else if num_cols == 1 && num_rows > 1 {
-        // Row-based layout: remove the row track
         let mut rows = grid.get_grid_template_rows();
         if child_index < rows.len() {
             rows.remove(child_index);
         }
         grid.set_grid_template_rows(rows);
     } else {
-        // Mixed grid: remove the column track for now (simplification)
         let mut cols = grid.get_grid_template_columns();
         if child_index < cols.len() {
             cols.remove(child_index);
@@ -106,12 +224,8 @@ pub fn close_panel(grid: &mut GridLayout, panel_id: PanelId) -> bool {
         grid.set_grid_template_columns(cols);
     }
 
-    // Remove from taffy tree
-    let root = grid.root();
     grid.tree_mut().remove_child(root, node).unwrap();
     grid.tree_mut().remove(node).unwrap();
-
-    // Remove from panels list
     grid.remove_panel(panel_id);
 
     true
@@ -160,6 +274,7 @@ pub fn toggle_fullscreen(grid: &mut GridLayout, panel_id: PanelId) -> bool {
             grid.set_grid_template_rows(state.saved_rows);
             replace_children(grid, &state.saved_children);
             *grid.panels_mut() = state.saved_panels;
+            grid.set_column_containers(state.saved_column_containers);
             grid.set_fullscreen_state(None);
             return false;
         }
@@ -168,11 +283,13 @@ pub fn toggle_fullscreen(grid: &mut GridLayout, panel_id: PanelId) -> bool {
         let saved_rows = state.saved_rows.clone();
         let saved_panels = state.saved_panels.clone();
         let saved_children = state.saved_children.clone();
+        let saved_containers = state.saved_column_containers.clone();
 
         grid.set_grid_template_columns(saved_cols);
         grid.set_grid_template_rows(saved_rows);
         replace_children(grid, &saved_children);
         *grid.panels_mut() = saved_panels;
+        grid.set_column_containers(saved_containers);
         grid.set_fullscreen_state(None);
         // Fall through to fullscreen the new panel
     }
@@ -189,6 +306,7 @@ pub fn toggle_fullscreen(grid: &mut GridLayout, panel_id: PanelId) -> bool {
     let saved_panels = grid.panel_nodes().to_vec();
     let root = grid.root();
     let saved_children = grid.tree().children(root).unwrap();
+    let saved_column_containers = grid.column_containers().clone();
 
     let state = FullscreenState {
         panel_id,
@@ -196,6 +314,7 @@ pub fn toggle_fullscreen(grid: &mut GridLayout, panel_id: PanelId) -> bool {
         saved_rows,
         saved_panels,
         saved_children,
+        saved_column_containers,
     };
     grid.set_fullscreen_state(Some(state));
 
@@ -253,10 +372,13 @@ mod tests {
 
         grid.compute(1280.0, 800.0);
 
-        // Grid now has 1 column, 2 rows. Both panels ~400px tall.
+        // Panel is now inside a column container with 2 rows
         assert_eq!(grid.panel_count(), 2);
+        // Root still has 1 column, 1 row (the container occupies the single slot)
+        let cols = grid.get_grid_template_columns();
+        assert_eq!(cols.len(), 1);
         let rows = grid.get_grid_template_rows();
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 1);
 
         let (_x0, y0, w0, h0) = grid.get_panel_rect(grid.panel_nodes()[0].0);
         let (_x1, y1, _w1, h1) = grid.get_panel_rect(grid.panel_nodes()[1].0);
@@ -266,6 +388,34 @@ mod tests {
         assert!((h1 - 400.0).abs() < 1.0, "Expected ~400px, got {}", h1);
         assert!(y1 > 0.0);
         assert!((w0 - 1280.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_vertical_split_is_column_local() {
+        let mut grid = GridLayout::new_single_panel();
+        // Create 2 columns: panel_a | panel_b
+        let panel_b = split_panel(&mut grid, PanelId(0), SplitDirection::Horizontal).unwrap();
+        grid.compute(1280.0, 800.0);
+
+        // Vertical split on panel_b — should only split that column
+        let panel_c = split_panel(&mut grid, panel_b, SplitDirection::Vertical).unwrap();
+        grid.compute(1280.0, 800.0);
+
+        assert_eq!(grid.panel_count(), 3);
+        // Root still has 2 columns
+        assert_eq!(grid.get_grid_template_columns().len(), 2);
+        // Root still has 1 row
+        assert_eq!(grid.get_grid_template_rows().len(), 1);
+
+        // Panel A should be full height
+        let (_xa, _ya, _wa, ha) = grid.get_panel_rect(grid.find_node(PanelId(0)).unwrap());
+        assert!((ha - 800.0).abs() < 1.0, "Panel A should be full height, got {}", ha);
+
+        // Panel B and C should each be ~400px tall
+        let (_xb, _yb, _wb, hb) = grid.get_panel_rect(grid.find_node(panel_b).unwrap());
+        let (_xc, _yc, _wc, hc) = grid.get_panel_rect(grid.find_node(panel_c).unwrap());
+        assert!((hb - 400.0).abs() < 1.0, "Panel B should be ~400px, got {}", hb);
+        assert!((hc - 400.0).abs() < 1.0, "Panel C should be ~400px, got {}", hc);
     }
 
     #[test]
@@ -337,7 +487,7 @@ mod tests {
     #[test]
     fn test_fullscreen_and_restore() {
         let mut grid = GridLayout::new_single_panel();
-        let new_id = split_panel(&mut grid, PanelId(0), SplitDirection::Horizontal).unwrap();
+        let _new_id = split_panel(&mut grid, PanelId(0), SplitDirection::Horizontal).unwrap();
         grid.compute(1280.0, 800.0);
 
         // Fullscreen the first panel

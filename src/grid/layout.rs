@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use taffy::prelude::*;
 
 use super::panel::PanelId;
@@ -10,6 +12,7 @@ pub struct FullscreenState {
     pub saved_rows: Vec<GridTemplateComponent<String>>,
     pub saved_panels: Vec<(NodeId, PanelId)>,
     pub saved_children: Vec<NodeId>,
+    pub saved_column_containers: HashSet<NodeId>,
 }
 
 /// CSS Grid layout engine wrapping taffy.
@@ -23,6 +26,7 @@ pub struct GridLayout {
     panels: Vec<(NodeId, PanelId)>,
     next_id: u64,
     fullscreen_state: Option<FullscreenState>,
+    column_containers: HashSet<NodeId>,
 }
 
 impl GridLayout {
@@ -54,6 +58,7 @@ impl GridLayout {
             panels: vec![(panel, PanelId(0))],
             next_id: 1,
             fullscreen_state: None,
+            column_containers: HashSet::new(),
         }
     }
 
@@ -70,15 +75,24 @@ impl GridLayout {
 
     /// Get the computed rectangle for a panel node.
     ///
-    /// Returns (x, y, width, height) in pixels relative to the grid root.
+    /// Returns (x, y, width, height) in absolute pixels relative to the grid root.
+    /// Walks up from the node to root, accumulating offsets for nested containers.
     pub fn get_panel_rect(&self, node: NodeId) -> (f32, f32, f32, f32) {
         let layout = self.tree.layout(node).unwrap();
-        (
-            layout.location.x,
-            layout.location.y,
-            layout.size.width,
-            layout.size.height,
-        )
+        let mut x = layout.location.x;
+        let mut y = layout.location.y;
+        let w = layout.size.width;
+        let h = layout.size.height;
+
+        if let Some(parent) = self.tree.parent(node) {
+            if parent != self.root {
+                let parent_layout = self.tree.layout(parent).unwrap();
+                x += parent_layout.location.x;
+                y += parent_layout.location.y;
+            }
+        }
+
+        (x, y, w, h)
     }
 
     /// Get the list of panel nodes and their IDs.
@@ -172,6 +186,36 @@ impl GridLayout {
     /// Get the number of panels.
     pub fn panel_count(&self) -> usize {
         self.panels.len()
+    }
+
+    /// Check if a node is a column container (intermediate nesting node).
+    pub fn is_column_container(&self, node: NodeId) -> bool {
+        self.column_containers.contains(&node)
+    }
+
+    /// Register a node as a column container.
+    pub fn add_column_container(&mut self, node: NodeId) {
+        self.column_containers.insert(node);
+    }
+
+    /// Remove a column container from tracking.
+    pub fn remove_column_container(&mut self, node: NodeId) {
+        self.column_containers.remove(&node);
+    }
+
+    /// Get the set of column containers.
+    pub fn column_containers(&self) -> &HashSet<NodeId> {
+        &self.column_containers
+    }
+
+    /// Set column containers (for fullscreen restore).
+    pub fn set_column_containers(&mut self, containers: HashSet<NodeId>) {
+        self.column_containers = containers;
+    }
+
+    /// Find the parent of a node in the taffy tree.
+    pub fn parent_of(&self, node: NodeId) -> Option<NodeId> {
+        self.tree.parent(node)
     }
 }
 
