@@ -111,6 +111,7 @@ impl TextEngine {
         labels: &[TextLabel],
         width: u32,
         height: u32,
+        scale_factor: f32,
     ) {
         self.viewport
             .update(queue, Resolution { width, height });
@@ -145,7 +146,7 @@ impl TextEngine {
                 buffer,
                 left: label.x,
                 top: label.y,
-                scale: 1.0,
+                scale: scale_factor,
                 bounds: TextBounds {
                     left: label.x as i32,
                     top: label.y as i32,
@@ -167,7 +168,7 @@ impl TextEngine {
                 buffer: buf,
                 left: meta.left,
                 top: meta.top,
-                scale: 1.0,
+                scale: scale_factor,
                 bounds: TextBounds {
                     left: meta.bounds_left,
                     top: meta.bounds_top,

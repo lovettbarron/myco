@@ -64,6 +64,7 @@ impl Renderer {
         labels: &[TextLabel],
         viewport_width: f32,
         viewport_height: f32,
+        scale_factor: f32,
     ) -> RenderResult {
         // Prepare quad data
         self.quad_renderer.prepare(
@@ -81,6 +82,7 @@ impl Renderer {
             labels,
             viewport_width as u32,
             viewport_height as u32,
+            scale_factor,
         );
 
         let surface_texture = self.gpu_state.surface().get_current_texture();

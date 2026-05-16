@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
@@ -49,6 +50,8 @@ pub struct App {
     terminal_manager: Option<TerminalManager>,
     /// GPU terminal renderer (snapshot + buffer building, quad generation).
     terminal_renderer: TerminalRenderer,
+    /// Next frame deadline for ~60fps throttle.
+    next_frame: Instant,
 }
 
 impl Default for App {
@@ -67,6 +70,7 @@ impl Default for App {
             modifiers: ModifiersState::empty(),
             terminal_manager: None,
             terminal_renderer: TerminalRenderer::new(),
+            next_frame: Instant::now(),
         }
     }
 }
@@ -1224,12 +1228,14 @@ impl ApplicationHandler for App {
                             .text_engine_mut()
                             .set_terminal_buffers(terminal_buffers, terminal_metas);
 
+                        let scale_factor = window.scale_factor() as f32;
                         match renderer.render(
                             self.theme.background,
                             &quads,
                             &labels,
                             vw,
                             vh,
+                            scale_factor,
                         ) {
                             crate::renderer::RenderResult::Ok => {}
                             crate::renderer::RenderResult::SkipFrame => {}
@@ -1247,19 +1253,25 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        const FRAME_BUDGET: Duration = Duration::from_millis(16); // ~60fps
+
         // Drain terminal events and update cursor blinks
         if let Some(tm) = &mut self.terminal_manager {
             tm.drain_all_events();
             tm.update_all_cursor_blinks();
-            // Clear expired copy flash animations (D-15)
             for ts in tm.terminals_mut().values_mut() {
                 ts.clear_expired_flash();
             }
         }
 
-        if let Some(window) = &self.window {
-            window.request_redraw();
+        let now = Instant::now();
+        if now >= self.next_frame {
+            self.next_frame = now + FRAME_BUDGET;
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(self.next_frame));
     }
 }
