@@ -85,6 +85,11 @@ impl TerminalManager {
         }
     }
 
+    /// Get immutable access to the terminals map.
+    pub fn terminals(&self) -> &HashMap<PanelId, TerminalState> {
+        &self.terminals
+    }
+
     /// Get mutable access to the terminals map.
     pub fn terminals_mut(&mut self) -> &mut HashMap<PanelId, TerminalState> {
         &mut self.terminals

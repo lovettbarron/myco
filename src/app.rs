@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 use winit::application::ApplicationHandler;
@@ -19,7 +20,7 @@ use crate::input::{CursorStyle, InputAction};
 use crate::renderer::quad_renderer::QuadInstance;
 use crate::renderer::text_renderer::TextLabel;
 use crate::renderer::Renderer;
-use crate::terminal::renderer::TerminalRenderer;
+use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
 use crate::theme::Theme;
 use crate::window::create_window;
@@ -560,7 +561,9 @@ impl App {
     }
 
     /// Build quad instances for the current frame.
-    fn build_quads(&self, width: f32, height: f32) -> Vec<QuadInstance> {
+    ///
+    /// Accepts pre-computed terminal snapshots to avoid re-snapshotting during text prep.
+    fn build_quads(&self, width: f32, height: f32, snapshots: &HashMap<PanelId, TerminalSnapshot>) -> Vec<QuadInstance> {
         let mut quads = Vec::new();
         let grid = match &self.grid {
             Some(g) => g,
@@ -630,19 +633,19 @@ impl App {
                         if let Some(ts) = tm.get(&panel_id) {
                             let content_y = py_offset + PANEL_TITLE_HEIGHT;
                             let content_h = ph - PANEL_TITLE_HEIGHT;
-                            let snapshot =
-                                TerminalRenderer::snapshot(&ts.term);
-                            let term_quads =
-                                self.terminal_renderer.build_terminal_quads(
-                                    &snapshot,
-                                    px,
-                                    content_y,
-                                    pw,
-                                    content_h,
-                                    self.theme.panel_background,
-                                    ts.cursor_blink_visible,
-                                );
-                            quads.extend(term_quads);
+                            if let Some(snapshot) = snapshots.get(&panel_id) {
+                                let term_quads =
+                                    self.terminal_renderer.build_terminal_quads(
+                                        snapshot,
+                                        px,
+                                        content_y,
+                                        pw,
+                                        content_h,
+                                        self.theme.panel_background,
+                                        ts.cursor_blink_visible,
+                                    );
+                                quads.extend(term_quads);
+                            }
 
                             // Selection highlight and copy flash quads
                             {
@@ -1153,11 +1156,27 @@ impl ApplicationHandler for App {
                     let vw = size.width as f32;
                     let vh = size.height as f32;
 
+                    // Pre-compute terminal snapshots once per frame (WR-01: avoid double snapshot).
+                    // Each snapshot acquires the FairMutex briefly. Reusing it for both
+                    // quad building and text preparation ensures visual consistency.
+                    let mut snapshots: HashMap<PanelId, TerminalSnapshot> = HashMap::new();
+                    if let Some(tm) = &self.terminal_manager {
+                        for (&panel_id, ts) in tm.terminals().iter() {
+                            let is_terminal = self
+                                .panels
+                                .iter()
+                                .any(|p| p.id == panel_id && p.panel_type == PanelType::Terminal);
+                            if is_terminal && !ts.exited {
+                                snapshots.insert(panel_id, TerminalRenderer::snapshot(&ts.term));
+                            }
+                        }
+                    }
+
                     // Build frame data
-                    let quads = self.build_quads(vw, vh);
+                    let quads = self.build_quads(vw, vh, &snapshots);
                     let labels = self.build_labels(vw, vh);
 
-                    // Prepare terminal text (snapshot + buffer building)
+                    // Prepare terminal text (buffer building from pre-computed snapshots)
                     // This must happen before renderer.render() since it sets
                     // terminal buffers on the text engine.
                     if let Some(renderer) = &mut self.renderer {
@@ -1170,35 +1189,27 @@ impl ApplicationHandler for App {
                                     renderer.text_engine_mut().font_system_mut();
                                 for &(node, panel_id) in grid.panel_nodes() {
                                     if let Some(ts) = tm.get(&panel_id) {
-                                        let is_terminal = self
-                                            .panels
-                                            .iter()
-                                            .any(|p| {
-                                                p.id == panel_id
-                                                    && p.panel_type
-                                                        == PanelType::Terminal
-                                            });
-                                        if is_terminal && !ts.exited {
-                                            let (px, py, pw, ph) =
-                                                grid.get_panel_rect(node);
-                                            let content_y =
-                                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
-                                            let content_h = ph - PANEL_TITLE_HEIGHT;
+                                        if let Some(snapshot) = snapshots.get(&panel_id) {
+                                            if !ts.exited {
+                                                let (px, py, pw, ph) =
+                                                    grid.get_panel_rect(node);
+                                                let content_y =
+                                                    py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+                                                let content_h = ph - PANEL_TITLE_HEIGHT;
 
-                                            let snapshot =
-                                                TerminalRenderer::snapshot(&ts.term);
-                                            let (bufs, metas) = self
-                                                .terminal_renderer
-                                                .prepare_buffers(
-                                                    font_system,
-                                                    &snapshot,
-                                                    px,
-                                                    content_y,
-                                                    pw,
-                                                    content_h,
-                                                );
-                                            terminal_buffers.extend(bufs);
-                                            terminal_metas.extend(metas);
+                                                let (bufs, metas) = self
+                                                    .terminal_renderer
+                                                    .prepare_buffers(
+                                                        font_system,
+                                                        snapshot,
+                                                        px,
+                                                        content_y,
+                                                        pw,
+                                                        content_h,
+                                                    );
+                                                terminal_buffers.extend(bufs);
+                                                terminal_metas.extend(metas);
+                                            }
                                         }
                                     }
                                 }
