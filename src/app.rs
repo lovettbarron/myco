@@ -276,10 +276,6 @@ impl App {
                         // Recalculate cell dimensions
                         ts.cell_width = new_size * 0.6;
                         ts.cell_height = new_size * 1.3;
-                        // Update terminal renderer
-                        self.terminal_renderer.font_size = new_size;
-                        self.terminal_renderer.cell_width = ts.cell_width;
-                        self.terminal_renderer.cell_height = ts.cell_height;
                         // Resize terminal grid and notify PTY
                         if let Some(grid) = &self.grid {
                             if let Some(node_id) = grid.find_node(panel_id) {
@@ -643,6 +639,8 @@ impl App {
                                         content_h,
                                         self.theme.panel_background,
                                         ts.cursor_blink_visible,
+                                        ts.cell_width,
+                                        ts.cell_height,
                                     );
                                 quads.extend(term_quads);
                             }
@@ -1206,6 +1204,9 @@ impl ApplicationHandler for App {
                                                         content_y,
                                                         pw,
                                                         content_h,
+                                                        ts.font_size,
+                                                        ts.cell_width,
+                                                        ts.cell_height,
                                                     );
                                                 terminal_buffers.extend(bufs);
                                                 terminal_metas.extend(metas);

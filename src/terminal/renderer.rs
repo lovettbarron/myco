@@ -152,21 +152,24 @@ impl TerminalRenderer {
         viewport_y: f32,
         viewport_w: f32,
         viewport_h: f32,
+        font_size: f32,
+        cell_width: f32,
+        cell_height: f32,
     ) -> (Vec<Buffer>, Vec<TerminalTextAreaMeta>) {
         let mut buffers = Vec::new();
         let mut metas = Vec::new();
 
-        let metrics = Metrics::new(self.font_size, self.cell_height);
+        let metrics = Metrics::new(font_size, cell_height);
 
         for (row_idx, row_cells) in snapshot.rows.iter().enumerate() {
             if row_cells.is_empty() {
                 continue;
             }
 
-            let top = viewport_y + (row_idx as f32) * self.cell_height;
+            let top = viewport_y + (row_idx as f32) * cell_height;
 
             // Skip rows that are outside the visible viewport
-            if top + self.cell_height < viewport_y || top > viewport_y + viewport_h {
+            if top + cell_height < viewport_y || top > viewport_y + viewport_h {
                 continue;
             }
 
@@ -177,7 +180,7 @@ impl TerminalRenderer {
             }
 
             let mut buffer = Buffer::new(font_system, metrics);
-            buffer.set_size(font_system, Some(viewport_w), Some(self.cell_height));
+            buffer.set_size(font_system, Some(viewport_w), Some(cell_height));
 
             let span_refs: Vec<(&str, Attrs)> = spans
                 .iter()
@@ -273,6 +276,8 @@ impl TerminalRenderer {
         _viewport_h: f32,
         panel_bg: [f32; 4],
         cursor_visible: bool,
+        cell_width: f32,
+        cell_height: f32,
     ) -> Vec<QuadInstance> {
         let mut quads = Vec::new();
 
@@ -285,7 +290,7 @@ impl TerminalRenderer {
 
         // Cell background quads: only render where cell bg differs from panel bg
         for (row_idx, row_cells) in snapshot.rows.iter().enumerate() {
-            let y = viewport_y + (row_idx as f32) * self.cell_height;
+            let y = viewport_y + (row_idx as f32) * cell_height;
             let mut col_idx: usize = 0;
 
             for cell in row_cells {
@@ -303,16 +308,16 @@ impl TerminalRenderer {
                     || (cell_bg[2] as i16 - bg_rgb[2] as i16).abs() > 2;
 
                 if differs {
-                    let x = viewport_x + (col_idx as f32) * self.cell_width;
+                    let x = viewport_x + (col_idx as f32) * cell_width;
                     let w = if cell.flags.contains(Flags::WIDE_CHAR) {
-                        self.cell_width * 2.0
+                        cell_width * 2.0
                     } else {
-                        self.cell_width
+                        cell_width
                     };
 
                     quads.push(QuadInstance {
                         position: [x, y],
-                        size: [w, self.cell_height],
+                        size: [w, cell_height],
                         color: [
                             cell_bg[0] as f32 / 255.0,
                             cell_bg[1] as f32 / 255.0,
@@ -337,8 +342,8 @@ impl TerminalRenderer {
             }
             let cursor_row = cursor_line as usize;
             let cursor_col = snapshot.cursor_point.column.0;
-            let cursor_x = viewport_x + (cursor_col as f32) * self.cell_width;
-            let cursor_y = viewport_y + (cursor_row as f32) * self.cell_height;
+            let cursor_x = viewport_x + (cursor_col as f32) * cell_width;
+            let cursor_y = viewport_y + (cursor_row as f32) * cell_height;
 
             // Cursor color: use foreground color
             let cursor_color = [
@@ -352,7 +357,7 @@ impl TerminalRenderer {
                 CursorShape::Block => {
                     quads.push(QuadInstance {
                         position: [cursor_x, cursor_y],
-                        size: [self.cell_width, self.cell_height],
+                        size: [cell_width, cell_height],
                         color: cursor_color,
                         corner_radius: 0.0,
                         _padding: 0.0,
@@ -362,7 +367,7 @@ impl TerminalRenderer {
                     // Thin vertical line (2px wide)
                     quads.push(QuadInstance {
                         position: [cursor_x, cursor_y],
-                        size: [2.0, self.cell_height],
+                        size: [2.0, cell_height],
                         color: cursor_color,
                         corner_radius: 0.0,
                         _padding: 0.0,
@@ -371,8 +376,8 @@ impl TerminalRenderer {
                 CursorShape::Underline => {
                     // Thin horizontal line at bottom (2px tall)
                     quads.push(QuadInstance {
-                        position: [cursor_x, cursor_y + self.cell_height - 2.0],
-                        size: [self.cell_width, 2.0],
+                        position: [cursor_x, cursor_y + cell_height - 2.0],
+                        size: [cell_width, 2.0],
                         color: cursor_color,
                         corner_radius: 0.0,
                         _padding: 0.0,
@@ -384,15 +389,15 @@ impl TerminalRenderer {
                     // Top edge
                     quads.push(QuadInstance {
                         position: [cursor_x, cursor_y],
-                        size: [self.cell_width, border],
+                        size: [cell_width, border],
                         color: cursor_color,
                         corner_radius: 0.0,
                         _padding: 0.0,
                     });
                     // Bottom edge
                     quads.push(QuadInstance {
-                        position: [cursor_x, cursor_y + self.cell_height - border],
-                        size: [self.cell_width, border],
+                        position: [cursor_x, cursor_y + cell_height - border],
+                        size: [cell_width, border],
                         color: cursor_color,
                         corner_radius: 0.0,
                         _padding: 0.0,
@@ -400,15 +405,15 @@ impl TerminalRenderer {
                     // Left edge
                     quads.push(QuadInstance {
                         position: [cursor_x, cursor_y],
-                        size: [border, self.cell_height],
+                        size: [border, cell_height],
                         color: cursor_color,
                         corner_radius: 0.0,
                         _padding: 0.0,
                     });
                     // Right edge
                     quads.push(QuadInstance {
-                        position: [cursor_x + self.cell_width - border, cursor_y],
-                        size: [border, self.cell_height],
+                        position: [cursor_x + cell_width - border, cursor_y],
+                        size: [border, cell_height],
                         color: cursor_color,
                         corner_radius: 0.0,
                         _padding: 0.0,
