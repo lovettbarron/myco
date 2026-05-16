@@ -57,6 +57,7 @@ impl Renderer {
     ///
     /// Quads render first, then text on top, all in a single render pass.
     /// Uses wgpu 29's `CurrentSurfaceTexture` enum (not the old `Result<_, SurfaceError>`).
+    #[tracing::instrument(skip_all, level = "trace")]
     pub fn render(
         &mut self,
         clear_color: [f32; 4],
