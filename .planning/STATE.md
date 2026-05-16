@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-05-16T00:36:22.386Z"
+last_updated: "2026-05-16T00:50:02.920Z"
 last_activity: 2026-05-16
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -73,6 +73,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [01-02]: cosmic-text 0.19 Buffer::set_text takes 5th alignment parameter (Option<Align>)
 - [Phase ?]: [01-03]: Grid operations use GridLayout helper methods to mutate taffy tree, keeping TaffyTree encapsulated
 - [Phase ?]: [01-03]: PanelSwapDrop carries both source and target IDs in action (avoids reading stale drag state)
+- [Phase ?]: cargo-packager uses flat TOML schema
+- [Phase ?]: rcodesign requires --keychain-fingerprint for cert selection
 
 ### Pending Todos
 
@@ -94,6 +96,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T00:36:22.380Z
+Last session: 2026-05-16T00:49:36.716Z
 Stopped at: Completed 01-03-PLAN.md
-Resume file: .planning/phases/01-window-grid-and-build-pipeline/01-04-PLAN.md
+Resume file: None
