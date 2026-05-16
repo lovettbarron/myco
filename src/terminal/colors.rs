@@ -17,27 +17,27 @@ impl Default for AnsiPalette {
     fn default() -> Self {
         Self {
             colors: [
-                // Normal colors (0-7)
+                // Dracula normal colors (0-7)
                 [0, 0, 0],         // Black
-                [204, 0, 0],       // Red
-                [78, 154, 6],      // Green
-                [196, 160, 0],     // Yellow
-                [52, 101, 164],    // Blue
-                [117, 80, 123],    // Magenta
-                [6, 152, 154],     // Cyan
-                [211, 215, 207],   // White
-                // Bright colors (8-15)
-                [85, 87, 83],      // Bright Black
-                [239, 41, 41],     // Bright Red
-                [138, 226, 52],    // Bright Green
-                [252, 233, 79],    // Bright Yellow
-                [114, 159, 207],   // Bright Blue
-                [173, 127, 168],   // Bright Magenta
-                [52, 226, 226],    // Bright Cyan
-                [238, 238, 236],   // Bright White
+                [255, 85, 85],     // Red       #ff5555
+                [80, 250, 123],    // Green     #50fa7b
+                [241, 250, 140],   // Yellow    #f1fa8c
+                [189, 147, 249],   // Blue      #bd93f9
+                [255, 121, 198],   // Magenta   #ff79c6
+                [139, 233, 253],   // Cyan      #8be9fd
+                [187, 187, 187],   // White     #bbbbbb
+                // Dracula bright colors (8-15)
+                [85, 85, 85],      // Bright Black   #555555
+                [255, 85, 85],     // Bright Red     #ff5555
+                [80, 250, 123],    // Bright Green   #50fa7b
+                [241, 250, 140],   // Bright Yellow  #f1fa8c
+                [202, 169, 250],   // Bright Blue    #caa9fa
+                [255, 121, 198],   // Bright Magenta #ff79c6
+                [139, 233, 253],   // Bright Cyan    #8be9fd
+                [255, 255, 255],   // Bright White   #ffffff
             ],
-            foreground: [211, 215, 207],
-            background: [36, 36, 41],
+            foreground: [248, 248, 242], // #f8f8f2
+            background: [40, 42, 54],    // #282a36
         }
     }
 }

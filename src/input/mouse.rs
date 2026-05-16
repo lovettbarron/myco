@@ -362,6 +362,12 @@ impl MouseState {
                         });
                     }
                 }
+                Some(PanelType::Canvas) => {
+                    actions.push(InputAction::CanvasZoom {
+                        panel_id,
+                        delta: delta_lines,
+                    });
+                }
                 _ => {}
             }
         }

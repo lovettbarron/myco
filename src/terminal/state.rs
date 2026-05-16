@@ -85,11 +85,25 @@ pub struct TerminalState {
     /// Search overlay state machine.
     pub search: crate::terminal::search::SearchState,
 
+    // --- Autocomplete state ---
+    /// Ghost text autocomplete and Ctrl+R history search.
+    pub autocomplete: crate::terminal::autocomplete::AutocompleteState,
+
     /// Whether the terminal grid has visual damage since last render.
     content_dirty: bool,
 
     /// Event listener handle for clearing the wake coalescing flag.
     event_listener: MycoEventListener,
+
+    /// Initial working directory (project dir).
+    pub working_dir: std::path::PathBuf,
+    /// Current working directory as reported by shell title (OSC 2).
+    pub current_title: Option<String>,
+
+    /// Cached git info (branch, optional stats). Refreshed periodically.
+    cached_git_info: Option<(String, Option<(usize, usize, usize)>)>,
+    /// Last time git info was refreshed.
+    git_info_last_refresh: Instant,
 }
 
 impl TerminalState {
@@ -173,8 +187,13 @@ impl TerminalState {
             has_new_output_while_scrolled: false,
             copy_flash_start: None,
             search: crate::terminal::search::SearchState::new(),
+            autocomplete: crate::terminal::autocomplete::AutocompleteState::new(),
             content_dirty: true,
             event_listener: listener_handle,
+            working_dir: working_dir.to_path_buf(),
+            current_title: None,
+            cached_git_info: None,
+            git_info_last_refresh: Instant::now() - Duration::from_secs(60),
         })
     }
 
@@ -212,6 +231,7 @@ impl TerminalState {
                 }
                 alacritty_terminal::event::Event::Title(title) => {
                     debug!("Terminal: Title changed to {:?}", title);
+                    self.current_title = Some(title);
                 }
                 other => {
                     debug!("Terminal: Unhandled event: {:?}", other);
@@ -296,6 +316,9 @@ impl TerminalState {
             let mut term = self.term.lock();
             term.scroll_display(Scroll::Delta(delta));
             self.scroll_offset = term.grid().display_offset();
+            if self.scroll_offset == 0 {
+                self.has_new_output_while_scrolled = false;
+            }
         }
     }
 
@@ -347,5 +370,65 @@ impl TerminalState {
                 self.copy_flash_start = None;
             }
         }
+    }
+
+    /// Get the effective CWD for display in the context pill.
+    /// Parses from shell title (zsh sets title to "user@host: /path" or just "/path"),
+    /// falls back to the initial working directory.
+    pub fn effective_cwd(&self) -> std::path::PathBuf {
+        if let Some(title) = &self.current_title {
+            // zsh default: "user@host: /path" or just the path
+            let path_str = if let Some(after_colon) = title.split(": ").nth(1) {
+                after_colon.trim()
+            } else if title.starts_with('/') {
+                title.trim()
+            } else {
+                return self.working_dir.clone();
+            };
+            let path = std::path::PathBuf::from(path_str);
+            if path.is_absolute() {
+                return path;
+            }
+        }
+        self.working_dir.clone()
+    }
+
+    /// Get a shortened display path for the CWD (replace $HOME with ~).
+    pub fn display_cwd(&self) -> String {
+        let cwd = self.effective_cwd();
+        let cwd_str = cwd.to_string_lossy();
+        if let Some(home) = dirs::home_dir() {
+            let home_str = home.to_string_lossy();
+            if let Some(rest) = cwd_str.strip_prefix(home_str.as_ref()) {
+                return format!("~{rest}");
+            }
+        }
+        cwd_str.into_owned()
+    }
+
+    /// Get git branch and status info for the effective CWD.
+    /// Cached for 5 seconds to avoid hitting the filesystem on every frame.
+    pub fn git_info(&mut self) -> Option<(String, Option<(usize, usize, usize)>)> {
+        if self.git_info_last_refresh.elapsed() > Duration::from_secs(5) {
+            self.git_info_last_refresh = Instant::now();
+            self.cached_git_info = Self::fetch_git_info(&self.effective_cwd());
+        }
+        self.cached_git_info.clone()
+    }
+
+    fn fetch_git_info(cwd: &std::path::Path) -> Option<(String, Option<(usize, usize, usize)>)> {
+        let repo = git2::Repository::discover(cwd).ok()?;
+        let head = repo.head().ok()?;
+        let branch = head.shorthand().unwrap_or("HEAD").to_string();
+
+        let stats = repo.diff_index_to_workdir(None, None).ok().and_then(|diff| {
+            let stats = diff.stats().ok()?;
+            let changed = stats.files_changed();
+            let ins = stats.insertions();
+            let del = stats.deletions();
+            if changed > 0 { Some((changed, ins, del)) } else { None }
+        });
+
+        Some((branch, stats))
     }
 }

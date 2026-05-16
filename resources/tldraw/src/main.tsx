@@ -5,6 +5,7 @@ import 'tldraw/tldraw.css';
 
 let store: any = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingSnapshot: any = null;
 
 function App() {
     return (
@@ -12,6 +13,12 @@ function App() {
             inferDarkMode
             onMount={(editor) => {
                 store = editor.store;
+
+                // Apply any snapshot that arrived before mount
+                if (pendingSnapshot) {
+                    loadSnapshot(store, pendingSnapshot);
+                    pendingSnapshot = null;
+                }
 
                 // D-02: Auto-save with 1500ms debounce
                 store.listen(() => {
@@ -34,6 +41,8 @@ function App() {
     const data = JSON.parse(jsonStr);
     if (store) {
         loadSnapshot(store, data);
+    } else {
+        pendingSnapshot = data;
     }
 };
 

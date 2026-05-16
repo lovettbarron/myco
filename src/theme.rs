@@ -32,25 +32,25 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Dark theme -- the default.
+    /// Dracula theme (Warp variant). Values are linear-light for sRGB surface.
     pub fn dark() -> Self {
         Self {
-            background: [0.1, 0.1, 0.12, 1.0],
-            panel_background: [0.14, 0.14, 0.16, 1.0],
-            title_bar_text: [0.78, 0.78, 0.80, 1.0],
-            divider: [0.2, 0.2, 0.22, 1.0],
-            divider_hover: [0.4, 0.4, 0.45, 1.0],
-            panel_label_text: [0.5, 0.5, 0.52, 1.0],
-            markdown_body_text: [0.86, 0.84, 0.81, 1.0],
-            markdown_heading_text: [0.93, 0.91, 0.88, 1.0],
-            markdown_code_text: [0.78, 0.84, 0.78, 1.0],
-            markdown_code_block_bg: [0.11, 0.11, 0.14, 1.0],
-            markdown_blockquote_border: [0.30, 0.30, 0.35, 1.0],
-            markdown_link_text: [0.45, 0.60, 0.85, 1.0],
-            markdown_hr: [0.25, 0.25, 0.28, 1.0],
-            sidebar_selected_bg: [0.18, 0.18, 0.22, 1.0],
-            sidebar_hover_bg: [0.16, 0.16, 0.19, 1.0],
-            sidebar_folder_text: [0.60, 0.60, 0.62, 1.0],
+            background: [0.0212, 0.0232, 0.0369, 1.0],              // #282a36
+            panel_background: [0.0252, 0.0273, 0.0437, 1.0],        // #2c2e3b
+            title_bar_text: [0.9387, 0.9387, 0.8879, 1.0],          // #f8f8f2
+            divider: [0.0356, 0.0382, 0.0648, 1.0],                 // #353748
+            divider_hover: [0.5089, 0.2918, 0.9473, 1.0],           // #bd93f9 purple accent
+            panel_label_text: [0.1221, 0.1683, 0.3712, 1.0],        // #6272a4 comment
+            markdown_body_text: [0.9387, 0.9387, 0.8879, 1.0],      // #f8f8f2
+            markdown_heading_text: [0.5089, 0.2918, 0.9473, 1.0],   // #bd93f9
+            markdown_code_text: [0.0802, 0.9560, 0.1981, 1.0],      // #50fa7b green
+            markdown_code_block_bg: [0.0152, 0.0160, 0.0252, 1.0],  // #21222c
+            markdown_blockquote_border: [0.1221, 0.1683, 0.3712, 1.0], // #6272a4
+            markdown_link_text: [0.2582, 0.8148, 0.9823, 1.0],      // #8be9fd cyan
+            markdown_hr: [0.0578, 0.0630, 0.1022, 1.0],             // #44475a current line
+            sidebar_selected_bg: [0.0578, 0.0630, 0.1022, 1.0],     // #44475a
+            sidebar_hover_bg: [0.0369, 0.0395, 0.0666, 1.0],        // #363849
+            sidebar_folder_text: [0.1221, 0.1683, 0.3712, 1.0],     // #6272a4
             unfocused_overlay: [0.0, 0.0, 0.0, 0.25],
         }
     }

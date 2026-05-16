@@ -59,6 +59,40 @@ const PANEL_TITLE_HEIGHT: f32 = 28.0;
 /// Horizontal padding inside panel content areas (e.g. terminal text inset from panel edge).
 const PANEL_CONTENT_PADDING: f32 = 8.0;
 
+enum AutocompleteAction {
+    None,
+    Enter,
+    Reset,
+    Backspace,
+    Chars(Vec<char>),
+}
+
+fn classify_input_for_autocomplete(bytes: &[u8]) -> AutocompleteAction {
+    match bytes {
+        [0x0d] => AutocompleteAction::Enter,
+        [0x03] | [0x15] | [0x1b] => AutocompleteAction::Reset,
+        [0x7f] | [0x08] => AutocompleteAction::Backspace,
+        _ => {
+            if bytes.len() == 1 && bytes[0] >= 0x20 && bytes[0] < 0x7f {
+                AutocompleteAction::Chars(vec![bytes[0] as char])
+            } else if let Ok(s) = std::str::from_utf8(bytes) {
+                if s.len() <= 4 && !s.starts_with('\x1b') {
+                    let chars: Vec<char> = s.chars().filter(|c| !c.is_control()).collect();
+                    if chars.is_empty() {
+                        AutocompleteAction::None
+                    } else {
+                        AutocompleteAction::Chars(chars)
+                    }
+                } else {
+                    AutocompleteAction::Reset
+                }
+            } else {
+                AutocompleteAction::None
+            }
+        }
+    }
+}
+
 /// Accumulates per-frame performance metrics (frame stats) for periodic logging.
 ///
 /// Records frame timing, quad count, and terminal cell count.
@@ -164,6 +198,8 @@ pub struct App {
     /// Menu bar state (action map and toggle entries).
     #[cfg(target_os = "macos")]
     menu_state: Option<crate::platform::menu::MenuState>,
+    /// Path of the file/dir targeted by the sidebar context menu.
+    context_menu_target: Option<std::path::PathBuf>,
 }
 
 impl App {
@@ -198,6 +234,7 @@ impl App {
             project_dir: None,
             #[cfg(target_os = "macos")]
             menu_state: None,
+            context_menu_target: None,
         }
     }
 }
@@ -327,6 +364,106 @@ impl App {
             InputAction::ContextMenu { .. } => {
                 // Reserved for future use
             }
+            InputAction::SidebarOpenInPane { path } => {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                match ext {
+                    "md" | "markdown" => {
+                        self.process_action(InputAction::OpenMarkdown { path });
+                    }
+                    "tldr" => {
+                        let canvas_id = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        self.create_canvas_with_id(&canvas_id);
+                    }
+                    _ => {
+                        debug!("Cannot open file type in pane: {}", ext);
+                    }
+                }
+            }
+            InputAction::SidebarRevealInFinder { path } => {
+                let target = if path.is_file() {
+                    path.parent().unwrap_or(&path).to_path_buf()
+                } else {
+                    path.clone()
+                };
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("open").arg(&target).spawn();
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = std::process::Command::new("xdg-open").arg(&target).spawn();
+                }
+            }
+            InputAction::SidebarRename { path } => {
+                #[cfg(target_os = "macos")]
+                {
+                    let old_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if let Some(new_name) =
+                        crate::platform::context_menu::show_rename_dialog(&old_name)
+                    {
+                        if !new_name.is_empty() && new_name != old_name {
+                            if let Some(parent) = path.parent() {
+                                let new_path = parent.join(&new_name);
+                                if let Err(e) = std::fs::rename(&path, &new_path) {
+                                    warn!("Failed to rename: {}", e);
+                                } else {
+                                    if let Some(sidebar) = &mut self.sidebar {
+                                        sidebar.refresh_file_tree();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            InputAction::SidebarDelete { path } => {
+                #[cfg(target_os = "macos")]
+                {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if crate::platform::context_menu::show_delete_confirmation(&name) {
+                        let result = if path.is_dir() {
+                            std::fs::remove_dir_all(&path)
+                        } else {
+                            std::fs::remove_file(&path)
+                        };
+                        if let Err(e) = result {
+                            warn!("Failed to delete: {}", e);
+                        } else {
+                            if let Some(sidebar) = &mut self.sidebar {
+                                sidebar.selected = None;
+                                sidebar.refresh_file_tree();
+                            }
+                        }
+                    }
+                }
+            }
+            InputAction::SidebarCopyPath { path } => {
+                if let Ok(mut ctx) = copypasta::ClipboardContext::new() {
+                    use copypasta::ClipboardProvider;
+                    let _ = ctx.set_contents(path.to_string_lossy().to_string());
+                }
+            }
+            InputAction::SidebarCopyRelativePath { path } => {
+                let relative = self
+                    .project_dir
+                    .as_ref()
+                    .and_then(|proj| path.strip_prefix(proj).ok())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                if let Ok(mut ctx) = copypasta::ClipboardContext::new() {
+                    use copypasta::ClipboardProvider;
+                    let _ = ctx.set_contents(relative);
+                }
+            }
             InputAction::SetCursor(style) => {
                 if let Some(window) = &self.window {
                     let icon = match style {
@@ -362,20 +499,57 @@ impl App {
             // === Terminal actions ===
             InputAction::TerminalInput { panel_id, bytes } => {
                 let mut should_close = false;
-                if let Some(tm) = &mut self.terminal_manager {
-                    if let Some(ts) = tm.get_mut(&panel_id) {
-                        // Per D-03: if terminal exited, any key closes the panel
+                // Determine what autocomplete action to take before borrowing mutably
+                let mut ac_action = AutocompleteAction::None;
+                if let Some(tm) = &self.terminal_manager {
+                    if let Some(ts) = tm.get(&panel_id) {
                         if ts.exited {
                             should_close = true;
                         } else {
-                            ts.write_to_pty(&bytes);
-                            ts.reset_cursor_blink();
+                            let in_alt = ts.term.lock().mode().contains(
+                                alacritty_terminal::term::TermMode::ALT_SCREEN,
+                            );
+                            if !in_alt {
+                                ac_action = classify_input_for_autocomplete(&bytes);
+                            }
                         }
                     }
                 }
                 if should_close {
                     self.process_action(InputAction::PanelClose { panel_id });
                     return;
+                }
+                if let Some(tm) = &mut self.terminal_manager {
+                    // Apply autocomplete tracking then write to PTY
+                    match ac_action {
+                        AutocompleteAction::Enter => {
+                            if let Some(ts) = tm.terminals.get_mut(&panel_id) {
+                                ts.autocomplete.on_enter(&mut tm.history);
+                            }
+                        }
+                        AutocompleteAction::Reset => {
+                            if let Some(ts) = tm.get_mut(&panel_id) {
+                                ts.autocomplete.on_control_reset();
+                            }
+                        }
+                        AutocompleteAction::Backspace => {
+                            if let Some(ts) = tm.terminals.get_mut(&panel_id) {
+                                ts.autocomplete.on_backspace(&tm.history);
+                            }
+                        }
+                        AutocompleteAction::Chars(chars) => {
+                            if let Some(ts) = tm.terminals.get_mut(&panel_id) {
+                                for ch in chars {
+                                    ts.autocomplete.on_char(ch, &tm.history);
+                                }
+                            }
+                        }
+                        AutocompleteAction::None => {}
+                    }
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        ts.write_to_pty(&bytes);
+                        ts.reset_cursor_blink();
+                    }
                 }
             }
             InputAction::TerminalCopy { panel_id } => {
@@ -519,6 +693,7 @@ impl App {
                 y,
                 block,
             } => {
+                let sidebar_off = self.sidebar_offset();
                 if let (Some(tm), Some(grid)) = (&mut self.terminal_manager, &self.grid) {
                     if let Some(ts) = tm.get_mut(&panel_id) {
                         // Check if click is on the "New output" indicator (D-10)
@@ -542,12 +717,18 @@ impl App {
                         }
 
                         if let Some(node) = grid.find_node(panel_id) {
-                            let (px, py, _pw, _ph) = grid.get_panel_rect(node);
-                            let viewport_x = px + PANEL_CONTENT_PADDING;
+                            let (px, py, _pw, ph) = grid.get_panel_rect(node);
+                            let viewport_x = px + sidebar_off + PANEL_CONTENT_PADDING;
+                            let content_h = ph - PANEL_TITLE_HEIGHT;
+                            let snapshot = TerminalRenderer::snapshot(&ts.term);
+                            let display_offset = snapshot.display_offset;
+                            let bottom_offset = if ts.scroll_offset == 0 {
+                                snapshot.bottom_align_offset(content_h, ts.cell_height, TerminalRenderer::PILL_RESERVE)
+                            } else {
+                                0.0
+                            };
                             let viewport_y =
-                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
-                            let display_offset =
-                                ts.term.lock().grid().display_offset();
+                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT + bottom_offset;
                             let point = crate::terminal::selection::pixel_to_point(
                                 x,
                                 y,
@@ -571,15 +752,22 @@ impl App {
             }
 
             InputAction::TerminalSelectionUpdate { panel_id, x, y } => {
+                let sidebar_off = self.sidebar_offset();
                 if let (Some(tm), Some(grid)) = (&mut self.terminal_manager, &self.grid) {
                     if let Some(ts) = tm.get_mut(&panel_id) {
                         if let Some(node) = grid.find_node(panel_id) {
-                            let (px, py, _pw, _ph) = grid.get_panel_rect(node);
-                            let viewport_x = px + PANEL_CONTENT_PADDING;
+                            let (px, py, _pw, ph) = grid.get_panel_rect(node);
+                            let viewport_x = px + sidebar_off + PANEL_CONTENT_PADDING;
+                            let content_h = ph - PANEL_TITLE_HEIGHT;
+                            let snapshot = TerminalRenderer::snapshot(&ts.term);
+                            let display_offset = snapshot.display_offset;
+                            let bottom_offset = if ts.scroll_offset == 0 {
+                                snapshot.bottom_align_offset(content_h, ts.cell_height, TerminalRenderer::PILL_RESERVE)
+                            } else {
+                                0.0
+                            };
                             let viewport_y =
-                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
-                            let display_offset =
-                                ts.term.lock().grid().display_offset();
+                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT + bottom_offset;
                             let point = crate::terminal::selection::pixel_to_point(
                                 x,
                                 y,
@@ -677,6 +865,71 @@ impl App {
                 }
             }
 
+            // === Autocomplete / History search actions ===
+            InputAction::AutocompleteAccept { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        if let Some(text) = ts.autocomplete.accept_ghost() {
+                            ts.write_to_pty(text.as_bytes());
+                            ts.reset_cursor_blink();
+                        }
+                    }
+                }
+            }
+            InputAction::HistorySearchOpen { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.terminals.get_mut(&panel_id) {
+                        ts.autocomplete.open_history_search(&tm.history);
+                    }
+                }
+            }
+            InputAction::HistorySearchClose { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        ts.autocomplete.close_history_search();
+                    }
+                }
+            }
+            InputAction::HistorySearchChar { panel_id, ch } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.terminals.get_mut(&panel_id) {
+                        ts.autocomplete.history_search_char(ch, &tm.history);
+                    }
+                }
+            }
+            InputAction::HistorySearchBackspace { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.terminals.get_mut(&panel_id) {
+                        ts.autocomplete.history_search_backspace(&tm.history);
+                    }
+                }
+            }
+            InputAction::HistorySearchNext { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        ts.autocomplete.history_search_next();
+                    }
+                }
+            }
+            InputAction::HistorySearchPrev { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        ts.autocomplete.history_search_prev();
+                    }
+                }
+            }
+            InputAction::HistorySearchAccept { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        if let Some(cmd) = ts.autocomplete.history_search_accept() {
+                            ts.write_to_pty(b"\x15");
+                            ts.write_to_pty(cmd.as_bytes());
+                            ts.reset_cursor_blink();
+                        }
+                    }
+                }
+            }
+
             // === Canvas actions (Phase 3) ===
             InputAction::CreateCanvas => {
                 if let Some(focused_id) = self.focused_panel {
@@ -697,18 +950,19 @@ impl App {
                             self.recompute_layout();
 
                             // Create canvas webview
-                            let bounds = self.panel_content_bounds(new_id);
-                            if let (Some(cm), Some(window), Some(proxy)) =
-                                (&mut self.canvas_manager, &self.window, &self.proxy)
-                            {
-                                if let Err(e) = cm.create_canvas(
-                                    new_id,
-                                    &canvas_id,
-                                    window,
-                                    bounds,
-                                    proxy.clone(),
-                                ) {
-                                    warn!("Failed to create canvas: {}", e);
+                            if let Some(bounds) = self.panel_content_bounds(new_id) {
+                                if let (Some(cm), Some(window), Some(proxy)) =
+                                    (&mut self.canvas_manager, &self.window, &self.proxy)
+                                {
+                                    if let Err(e) = cm.create_canvas(
+                                        new_id,
+                                        &canvas_id,
+                                        window,
+                                        bounds,
+                                        proxy.clone(),
+                                    ) {
+                                        warn!("Failed to create canvas: {}", e);
+                                    }
                                 }
                             }
                         }
@@ -798,10 +1052,20 @@ impl App {
             }
             InputAction::MarkdownScroll { panel_id, delta } => {
                 // Compute bounds before borrowing markdown_manager mutably
-                let viewport_h = self.panel_content_bounds(panel_id).3;
+                let viewport_h = self.panel_content_bounds(panel_id).map(|b| b.3).unwrap_or(300.0);
                 if let Some(mm) = &mut self.markdown_manager {
                     if let Some(state) = mm.get_mut(&panel_id) {
                         state.scroll(delta, viewport_h);
+                    }
+                }
+            }
+            InputAction::CanvasZoom { panel_id, delta } => {
+                if let Some(cm) = &self.canvas_manager {
+                    if let Some(webview) = cm.get_webview(&panel_id) {
+                        let zoom_factor = if delta > 0.0 { 1.05 } else { 0.95 };
+                        let _ = webview.evaluate_script(&format!(
+                            "if(window.editor){{var z=window.editor.getCamera().z;window.editor.setCamera({{...window.editor.getCamera(),z:z*{zoom_factor}}});}}"
+                        ));
                     }
                 }
             }
@@ -916,6 +1180,33 @@ impl App {
     /// Handle a menu bar action by tag, resolving to InputAction.
     #[cfg(target_os = "macos")]
     fn handle_menu_action(&mut self, tag: u32) {
+        #[cfg(target_os = "macos")]
+        {
+            use crate::platform::context_menu::*;
+            if let Some(path) = self.context_menu_target.take() {
+                let action = match tag {
+                    CTX_TAG_OPEN_IN_PANE => Some(InputAction::SidebarOpenInPane { path }),
+                    CTX_TAG_REVEAL_IN_FINDER => {
+                        Some(InputAction::SidebarRevealInFinder { path })
+                    }
+                    CTX_TAG_RENAME => Some(InputAction::SidebarRename { path }),
+                    CTX_TAG_DELETE => Some(InputAction::SidebarDelete { path }),
+                    CTX_TAG_COPY_PATH => Some(InputAction::SidebarCopyPath { path }),
+                    CTX_TAG_COPY_RELATIVE_PATH => {
+                        Some(InputAction::SidebarCopyRelativePath { path })
+                    }
+                    _ => {
+                        self.context_menu_target = Some(path);
+                        None
+                    }
+                };
+                if let Some(action) = action {
+                    self.process_action(action);
+                    return;
+                }
+            }
+        }
+
         let action_name = {
             let menu_state = match &self.menu_state {
                 Some(s) => s,
@@ -965,19 +1256,16 @@ impl App {
 
     /// Get the content bounds (below panel title) for a panel in logical pixels.
     /// When sidebar is visible, panel x positions are offset by SIDEBAR_WIDTH.
-    fn panel_content_bounds(&self, panel_id: PanelId) -> (f32, f32, f32, f32) {
-        if let Some(grid) = &self.grid {
-            if let Some(node_id) = grid.find_node(panel_id) {
-                let (x, y, w, h) = grid.get_panel_rect(node_id);
-                let sidebar_offset = self.sidebar_offset();
-                let content_x = x + sidebar_offset + PANEL_CONTENT_PADDING;
-                let content_y = y + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
-                let content_w = w - PANEL_CONTENT_PADDING * 2.0;
-                let content_h = h - PANEL_TITLE_HEIGHT;
-                return (content_x, content_y, content_w, content_h);
-            }
-        }
-        (0.0, 0.0, 400.0, 300.0) // Fallback
+    fn panel_content_bounds(&self, panel_id: PanelId) -> Option<(f32, f32, f32, f32)> {
+        let grid = self.grid.as_ref()?;
+        let node_id = grid.find_node(panel_id)?;
+        let (x, y, w, h) = grid.get_panel_rect(node_id);
+        let sidebar_offset = self.sidebar_offset();
+        let content_x = x + sidebar_offset + PANEL_CONTENT_PADDING;
+        let content_y = y + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+        let content_w = w - PANEL_CONTENT_PADDING * 2.0;
+        let content_h = h - PANEL_TITLE_HEIGHT;
+        Some((content_x, content_y, content_w, content_h))
     }
 
     /// Get the sidebar x offset (SIDEBAR_WIDTH when visible, 0 when hidden).
@@ -1003,18 +1291,19 @@ impl App {
                     self.recompute_layout();
 
                     // Create canvas webview
-                    let bounds = self.panel_content_bounds(new_id);
-                    if let (Some(cm), Some(window), Some(proxy)) =
-                        (&mut self.canvas_manager, &self.window, &self.proxy)
-                    {
-                        if let Err(e) = cm.create_canvas(
-                            new_id,
-                            canvas_id,
-                            window,
-                            bounds,
-                            proxy.clone(),
-                        ) {
-                            warn!("Failed to create canvas: {}", e);
+                    if let Some(bounds) = self.panel_content_bounds(new_id) {
+                        if let (Some(cm), Some(window), Some(proxy)) =
+                            (&mut self.canvas_manager, &self.window, &self.proxy)
+                        {
+                            if let Err(e) = cm.create_canvas(
+                                new_id,
+                                canvas_id,
+                                window,
+                                bounds,
+                                proxy.clone(),
+                            ) {
+                                warn!("Failed to create canvas: {}", e);
+                            }
                         }
                     }
                 }
@@ -1049,8 +1338,9 @@ impl App {
         if let Some(cm) = &self.canvas_manager {
             for panel in &self.panels {
                 if panel.panel_type == PanelType::Canvas {
-                    let bounds = self.panel_content_bounds(panel.id);
-                    cm.resize(&panel.id, bounds);
+                    if let Some(bounds) = self.panel_content_bounds(panel.id) {
+                        cm.resize(&panel.id, bounds);
+                    }
                 }
             }
         }
@@ -1087,11 +1377,18 @@ impl App {
     ///
     /// Accepts pre-computed terminal snapshots to avoid re-snapshotting during text prep.
     #[tracing::instrument(skip_all, level = "trace")]
-    fn build_quads(&self, width: f32, height: f32, snapshots: &HashMap<PanelId, TerminalSnapshot>) -> Vec<QuadInstance> {
+    fn build_quads(
+        &self,
+        width: f32,
+        height: f32,
+        snapshots: &HashMap<PanelId, TerminalSnapshot>,
+        pill_data: &HashMap<PanelId, (String, Option<(String, Option<(usize, usize, usize)>)>)>,
+    ) -> (Vec<QuadInstance>, Vec<TextLabel>) {
         let mut quads = Vec::new();
+        let mut pill_label_buf: Vec<TextLabel> = Vec::new();
         let grid = match &self.grid {
             Some(g) => g,
-            None => return quads,
+            None => return (quads, pill_label_buf),
         };
 
         quads.push(QuadInstance {
@@ -1141,7 +1438,7 @@ impl App {
             quads.push(QuadInstance {
                 position: [close_x, close_y],
                 size: [16.0, 16.0],
-                color: [0.3, 0.15, 0.15, 0.6],
+                color: [0.214, 0.024, 0.024, 0.6],
                 corner_radius: 2.0,
                 _padding: 0.0,
             });
@@ -1152,7 +1449,7 @@ impl App {
             quads.push(QuadInstance {
                 position: [fs_x, fs_y],
                 size: [16.0, 16.0],
-                color: [0.15, 0.15, 0.3, 0.6],
+                color: [0.068, 0.043, 0.126, 0.6],
                 corner_radius: 2.0,
                 _padding: 0.0,
             });
@@ -1168,7 +1465,7 @@ impl App {
                 });
             }
 
-            // Terminal-specific quads (cell backgrounds, cursor)
+            // Terminal-specific quads (cell backgrounds, cursor, context pills)
             if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
                 if panel.panel_type == PanelType::Terminal {
                     if let Some(tm) = &self.terminal_manager {
@@ -1176,11 +1473,18 @@ impl App {
                             let content_y = py_offset + PANEL_TITLE_HEIGHT;
                             let content_h = ph - PANEL_TITLE_HEIGHT;
                             if let Some(snapshot) = snapshots.get(&panel_id) {
+                                // Bottom-align offset (same calc as text cache)
+                                let bottom_offset = if ts.scroll_offset == 0 {
+                                    snapshot.bottom_align_offset(content_h, ts.cell_height, TerminalRenderer::PILL_RESERVE)
+                                } else {
+                                    0.0
+                                };
+
                                 let term_quads =
                                     self.terminal_renderer.build_terminal_quads(
                                         snapshot,
                                         px + PANEL_CONTENT_PADDING,
-                                        content_y,
+                                        content_y + bottom_offset,
                                         pw - PANEL_CONTENT_PADDING * 2.0,
                                         content_h,
                                         self.theme.panel_background,
@@ -1189,6 +1493,27 @@ impl App {
                                         ts.cell_height,
                                     );
                                 quads.extend(term_quads);
+
+                                // Context pills below the last content row
+                                if let Some((display_cwd, git)) = pill_data.get(&panel_id) {
+                                    let last_row = snapshot.last_content_row();
+                                    let pill_y = content_y + bottom_offset
+                                        + ((last_row + 1) as f32 * ts.cell_height);
+                                    let panel_bottom = content_y + content_h;
+                                    if pill_y + TerminalRenderer::PILL_ROW_HEIGHT <= panel_bottom {
+                                        let content_w = pw - PANEL_CONTENT_PADDING * 2.0;
+                                        let (pill_quads, pill_labels) = self.terminal_renderer
+                                            .build_context_pills(
+                                                display_cwd,
+                                                git.as_ref(),
+                                                px + PANEL_CONTENT_PADDING,
+                                                pill_y,
+                                                content_w,
+                                            );
+                                        quads.extend(pill_quads);
+                                        pill_label_buf.extend(pill_labels);
+                                    }
+                                }
                             }
 
                             // Selection highlight and copy flash quads
@@ -1199,7 +1524,11 @@ impl App {
                                     self.terminal_renderer.build_selection_quads(
                                         &term,
                                         px + PANEL_CONTENT_PADDING,
-                                        content_y,
+                                        content_y + if let Some(snapshot) = snapshots.get(&panel_id) {
+                                            if ts.scroll_offset == 0 {
+                                                snapshot.bottom_align_offset(content_h, ts.cell_height, TerminalRenderer::PILL_RESERVE)
+                                            } else { 0.0 }
+                                        } else { 0.0 },
                                         ts.cell_width,
                                         ts.cell_height,
                                         flash_opacity,
@@ -1216,7 +1545,7 @@ impl App {
                                 quads.push(QuadInstance {
                                     position: [indicator_x, indicator_y],
                                     size: [indicator_w, indicator_h],
-                                    color: [0.2, 0.4, 0.8, 0.7],
+                                    color: [0.509, 0.291, 0.946, 0.7],
                                     corner_radius: 4.0,
                                     _padding: 0.0,
                                 });
@@ -1241,19 +1570,58 @@ impl App {
                                 let screen_lines = term.screen_lines();
                                 drop(term);
 
+                                let search_bottom_off = if let Some(snap) = snapshots.get(&panel_id) {
+                                    if ts.scroll_offset == 0 {
+                                        snap.bottom_align_offset(content_h, ts.cell_height, TerminalRenderer::PILL_RESERVE)
+                                    } else { 0.0 }
+                                } else { 0.0 };
                                 let search_quads = self
                                     .terminal_renderer
                                     .build_search_quads(
                                         ts.search.match_positions(),
                                         ts.search.current_match_index(),
                                         px + PANEL_CONTENT_PADDING,
-                                        content_y,
+                                        content_y + search_bottom_off,
                                         ts.cell_width,
                                         ts.cell_height,
                                         display_offset,
                                         screen_lines,
                                     );
                                 quads.extend(search_quads);
+                            }
+
+                            // History search overlay quads (Ctrl+R)
+                            if ts.autocomplete.history_search_is_open() {
+                                let results = ts.autocomplete.history_search_results();
+                                let visible_count = results.len().min(10);
+                                let overlay_h = 32.0 + (visible_count as f32 * 28.0);
+                                let overlay_w = 400.0_f32.min(pw - 20.0).max(200.0);
+                                let overlay_x = px + (pw - overlay_w) / 2.0;
+                                let overlay_y = content_y + 10.0;
+
+                                // Background
+                                quads.push(QuadInstance {
+                                    position: [overlay_x, overlay_y],
+                                    size: [overlay_w, overlay_h],
+                                    color: [0.015, 0.016, 0.025, 0.97],
+                                    corner_radius: 6.0,
+                                    _padding: 0.0,
+                                });
+
+                                // Selected result highlight
+                                let selected = ts.autocomplete.history_search_selected();
+                                if selected < visible_count {
+                                    quads.push(QuadInstance {
+                                        position: [
+                                            overlay_x + 4.0,
+                                            overlay_y + 32.0 + (selected as f32 * 28.0),
+                                        ],
+                                        size: [overlay_w - 8.0, 26.0],
+                                        color: [0.100, 0.059, 0.187, 0.8],
+                                        corner_radius: 3.0,
+                                        _padding: 0.0,
+                                    });
+                                }
                             }
                         }
                     }
@@ -1366,7 +1734,7 @@ impl App {
             quads.push(QuadInstance {
                 position: [dialog_x, dialog_y],
                 size: [dialog_w, dialog_h],
-                color: [0.16, 0.16, 0.18, 1.0],
+                color: [0.058, 0.063, 0.102, 1.0],
                 corner_radius: 8.0,
                 _padding: 0.0,
             });
@@ -1374,19 +1742,19 @@ impl App {
             quads.push(QuadInstance {
                 position: [dialog_x, dialog_y],
                 size: [dialog_w, 3.0],
-                color: [0.45, 0.60, 0.85, 1.0],
+                color: [0.509, 0.291, 0.946, 1.0],
                 corner_radius: 0.0,
                 _padding: 0.0,
             });
         }
 
-        quads
+        (quads, pill_label_buf)
     }
 
     /// Build text labels for the current frame.
     #[tracing::instrument(skip_all, level = "trace")]
     #[allow(clippy::unused_self)]
-    fn build_labels(&self, width: f32, height: f32) -> Vec<TextLabel> {
+    fn build_labels(&self, width: f32, height: f32, snapshots: &HashMap<PanelId, TerminalSnapshot>) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let grid = match &self.grid {
             Some(g) => g,
@@ -1419,10 +1787,9 @@ impl App {
 
             if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
                 // Panel title bar label (show title for markdown, type for others)
-                let title_text = if panel.panel_type == PanelType::Markdown {
-                    panel.title.clone()
-                } else {
-                    panel.panel_type.to_string()
+                let title_text = match panel.panel_type {
+                    PanelType::Markdown | PanelType::Canvas => panel.title.clone(),
+                    _ => panel.panel_type.to_string(),
                 };
                 labels.push(TextLabel {
                     text: title_text,
@@ -1544,7 +1911,90 @@ impl App {
                                     });
                                 }
                             }
-                            // Terminal text is rendered via terminal_renderer, not labels
+
+                            // Ghost text autocomplete label
+                            if let Some(ghost) = ts.autocomplete.ghost_text() {
+                                let in_alt = ts.term.lock().mode().contains(
+                                    alacritty_terminal::term::TermMode::ALT_SCREEN,
+                                );
+                                if !in_alt && !ghost.is_empty() {
+                                    let term = ts.term.lock();
+                                    let cursor = term.renderable_content().cursor.point;
+                                    drop(term);
+                                    let content_y = py_offset + PANEL_TITLE_HEIGHT;
+                                    let content_h = ph - PANEL_TITLE_HEIGHT;
+                                    let ghost_offset = if let Some(snap) = snapshots.get(&panel_id) {
+                                        if ts.scroll_offset == 0 {
+                                            snap.bottom_align_offset(content_h, ts.cell_height, TerminalRenderer::PILL_RESERVE)
+                                        } else { 0.0 }
+                                    } else { 0.0 };
+                                    let ghost_x = px + PANEL_CONTENT_PADDING
+                                        + (cursor.column.0 as f32) * ts.cell_width;
+                                    let ghost_y =
+                                        content_y + ghost_offset + (cursor.line.0 as f32) * ts.cell_height;
+                                    labels.push(TextLabel {
+                                        text: ghost.to_string(),
+                                        x: ghost_x,
+                                        y: ghost_y,
+                                        width: pw - (ghost_x - px),
+                                        height: ts.cell_height,
+                                        font_size: ts.font_size,
+                                        color: glyphon::Color::rgba(120, 120, 140, 180),
+                                    });
+                                }
+                            }
+
+                            // History search overlay labels (Ctrl+R)
+                            if ts.autocomplete.history_search_is_open() {
+                                let content_y = py_offset + PANEL_TITLE_HEIGHT;
+                                let results = ts.autocomplete.history_search_results();
+                                let visible_count = results.len().min(10);
+                                let overlay_w = 400.0_f32.min(pw - 20.0).max(200.0);
+                                let overlay_x = px + (pw - overlay_w) / 2.0;
+                                let overlay_y = content_y + 10.0;
+
+                                // Search input label
+                                let query = ts.autocomplete.history_search_query();
+                                let display_query = if query.is_empty() {
+                                    "Search history...".to_string()
+                                } else {
+                                    query.to_string()
+                                };
+                                labels.push(TextLabel {
+                                    text: format!("  {}", display_query),
+                                    x: overlay_x + 8.0,
+                                    y: overlay_y + 8.0,
+                                    width: overlay_w - 16.0,
+                                    height: 16.0,
+                                    font_size: 13.0,
+                                    color: if query.is_empty() {
+                                        glyphon::Color::rgba(120, 120, 130, 255)
+                                    } else {
+                                        glyphon::Color::rgba(220, 220, 230, 255)
+                                    },
+                                });
+
+                                // Result entries
+                                for (i, result) in
+                                    results.iter().take(visible_count).enumerate()
+                                {
+                                    let entry_y =
+                                        overlay_y + 32.0 + (i as f32 * 28.0) + 5.0;
+                                    let truncated: String =
+                                        result.chars().take(60).collect();
+                                    labels.push(TextLabel {
+                                        text: truncated,
+                                        x: overlay_x + 12.0,
+                                        y: entry_y,
+                                        width: overlay_w - 24.0,
+                                        height: 16.0,
+                                        font_size: 12.0,
+                                        color: glyphon::Color::rgba(
+                                            200, 200, 210, 255,
+                                        ),
+                                    });
+                                }
+                            }
                         }
                     }
                 } else if panel.panel_type != PanelType::Markdown {
@@ -1800,11 +2250,22 @@ impl ApplicationHandler<UserEvent> for App {
                 if sidebar_visible && (lx as f32) < SIDEBAR_WIDTH && (ly as f32) > TITLE_BAR_HEIGHT {
                     let sidebar_y = ly as f32 - TITLE_BAR_HEIGHT;
                     if let Some(sidebar) = &mut self.sidebar {
+                        let prev = sidebar.hovered;
                         sidebar.hovered = sidebar.entry_at_y(sidebar_y);
+                        if sidebar.hovered != prev {
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                        }
                     }
                 } else if sidebar_visible {
                     if let Some(sidebar) = &mut self.sidebar {
-                        sidebar.hovered = None;
+                        if sidebar.hovered.is_some() {
+                            sidebar.hovered = None;
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                        }
                     }
                 }
 
@@ -1872,6 +2333,30 @@ impl ApplicationHandler<UserEvent> for App {
                                 && sidebar_y <= entries_end + crate::sidebar::ENTRY_HEIGHT_PX
                             {
                                 self.process_action(InputAction::SidebarNewCanvas);
+                            }
+                        }
+                    }
+                } else if sidebar_visible
+                    && lx < SIDEBAR_WIDTH
+                    && ly > TITLE_BAR_HEIGHT
+                    && state == ElementState::Pressed
+                    && button == MouseButton::Right
+                {
+                    let sidebar_y = ly - TITLE_BAR_HEIGHT;
+                    if let Some(sidebar) = &mut self.sidebar {
+                        if let Some(index) = sidebar.entry_at_y(sidebar_y) {
+                            sidebar.selected = Some(index);
+                            let entry = &sidebar.entries[index];
+                            let is_dir = entry.is_dir;
+                            self.context_menu_target = Some(entry.path.clone());
+                            #[cfg(target_os = "macos")]
+                            if let Some(window) = &self.window {
+                                crate::platform::context_menu::show_sidebar_context_menu(
+                                    window,
+                                    lx,
+                                    ly,
+                                    is_dir,
+                                );
                             }
                         }
                     }
@@ -1974,19 +2459,40 @@ impl ApplicationHandler<UserEvent> for App {
                             .map(|ts| ts.search.is_open())
                     })
                     .unwrap_or(false);
+                let history_search_open = self
+                    .focused_panel
+                    .and_then(|pid| {
+                        self.terminal_manager
+                            .as_ref()?
+                            .get(&pid)
+                            .map(|ts| ts.autocomplete.history_search_is_open())
+                    })
+                    .unwrap_or(false);
+                let has_ghost_text = self
+                    .focused_panel
+                    .and_then(|pid| {
+                        self.terminal_manager
+                            .as_ref()?
+                            .get(&pid)
+                            .map(|ts| ts.autocomplete.ghost_text().is_some())
+                    })
+                    .unwrap_or(false);
                 let term_mode = self
                     .focused_panel
                     .and_then(|pid| self.terminal_manager.as_ref()?.get(&pid))
                     .map(|ts| *ts.term.lock().mode())
                     .unwrap_or(alacritty_terminal::term::TermMode::empty());
-                if let Some(action) = keyboard::handle_key_event(
+                let actions = keyboard::handle_key_event(
                     &event,
                     &self.modifiers,
                     self.focused_panel,
                     panel_type,
                     search_open,
+                    history_search_open,
+                    has_ghost_text,
                     term_mode,
-                ) {
+                );
+                for action in actions {
                     self.process_action(action);
                 }
             }
@@ -2033,11 +2539,25 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                     drop(_snap_span);
+
+                    // Pre-compute context pill data (CWD + git info) while we have &mut access
+                    let mut pill_data: HashMap<PanelId, (String, Option<(String, Option<(usize, usize, usize)>)>)> = HashMap::new();
+                    if let Some(tm) = &mut self.terminal_manager {
+                        for (&panel_id, ts) in tm.terminals_mut().iter_mut() {
+                            if !ts.exited {
+                                let cwd = ts.display_cwd();
+                                let git = ts.git_info();
+                                pill_data.insert(panel_id, (cwd, git));
+                            }
+                        }
+                    }
+
                     let cell_count: usize = snapshots.values().map(|s| s.cols * s.rows.len()).sum();
 
                     // Build frame data in logical coordinates
-                    let logical_quads = self.build_quads(logical_w, logical_h, &snapshots);
-                    let logical_labels = self.build_labels(logical_w, logical_h);
+                    let (logical_quads, pill_labels) = self.build_quads(logical_w, logical_h, &snapshots, &pill_data);
+                    let mut logical_labels = self.build_labels(logical_w, logical_h, &snapshots);
+                    logical_labels.extend(pill_labels);
 
                     // Scale quads from logical to physical at the GPU render boundary
                     let quads: Vec<QuadInstance> = logical_quads
@@ -2085,12 +2605,19 @@ impl ApplicationHandler<UserEvent> for App {
                                                     py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
                                                 let content_h = ph - PANEL_TITLE_HEIGHT;
 
+                                                // Bottom-align: push content down when it doesn't fill the viewport
+                                                let bottom_offset = if ts.scroll_offset == 0 {
+                                                    snapshot.bottom_align_offset(content_h, ts.cell_height, TerminalRenderer::PILL_RESERVE)
+                                                } else {
+                                                    0.0
+                                                };
+
                                                 self.terminal_renderer.update_cache(
                                                     panel_id,
                                                     font_system,
                                                     snapshot,
                                                     px + sidebar_off + PANEL_CONTENT_PADDING,
-                                                    content_y,
+                                                    content_y + bottom_offset,
                                                     pw - PANEL_CONTENT_PADDING * 2.0,
                                                     content_h,
                                                     ts.font_size,

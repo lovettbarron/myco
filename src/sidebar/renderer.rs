@@ -143,9 +143,9 @@ impl SidebarRenderer {
             // Build display text with folder indicators
             let display_text = if entry.is_dir {
                 let indicator = if entry.expanded {
-                    "\u{25BC} "
+                    "\u{25BE} "
                 } else {
-                    "\u{25B6} "
+                    "\u{25B8} "
                 };
                 format!("{}{}/", indicator, entry.name)
             } else {

@@ -68,10 +68,11 @@ impl Panel {
 
     /// Create a new canvas panel with the given ID and canvas identifier.
     pub fn new_canvas(id: PanelId, canvas_id: String) -> Self {
+        let title = format!("{}.tldr", canvas_id);
         Self {
             id,
             panel_type: PanelType::Canvas,
-            title: "Canvas".into(),
+            title,
             file_path: None,
             canvas_id: Some(canvas_id),
         }

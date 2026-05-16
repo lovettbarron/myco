@@ -15,6 +15,7 @@ use crate::app::UserEvent;
 
 thread_local! {
     static MENU_PROXY: RefCell<Option<EventLoopProxy<UserEvent>>> = const { RefCell::new(None) };
+    static MENU_HANDLER: RefCell<Option<Retained<MenuActionHandler>>> = const { RefCell::new(None) };
 }
 
 define_class!(
@@ -183,8 +184,9 @@ pub fn setup_menu_bar(proxy: EventLoopProxy<UserEvent>) -> MenuState {
 
     app.setMainMenu(Some(&menu_bar));
 
-    // Keep handler alive for the lifetime of the app
-    std::mem::forget(handler);
+    MENU_HANDLER.with(|h| {
+        *h.borrow_mut() = Some(handler);
+    });
 
     MenuState { action_map, toggles }
 }
@@ -219,6 +221,16 @@ fn find_item_by_tag(menu: &NSMenu, tag: isize) -> Option<Retained<NSMenuItem>> {
         }
     }
     None
+}
+
+pub fn with_menu_handler<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce(&AnyObject) -> R,
+{
+    MENU_HANDLER.with(|h| {
+        let borrow = h.borrow();
+        borrow.as_ref().map(|handler| f(handler.as_ref() as &AnyObject))
+    })
 }
 
 fn parse_modifiers(s: &str) -> NSEventModifierFlags {

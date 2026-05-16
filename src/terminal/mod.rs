@@ -3,8 +3,10 @@
 //! Provides PTY management, VTE parsing (via alacritty_terminal), keyboard input
 //! translation, color resolution, and GPU rendering of the character grid.
 
+pub mod autocomplete;
 pub mod colors;
 pub mod event_listener;
+pub mod history;
 pub mod input;
 pub mod renderer;
 pub mod search;
@@ -19,6 +21,7 @@ use std::path::PathBuf;
 use tracing::debug;
 
 use crate::grid::PanelId;
+use history::CommandHistory;
 
 /// Unique identifier for a terminal instance.
 pub type TerminalId = u64;
@@ -28,15 +31,19 @@ pub type TerminalId = u64;
 /// Maps PanelId to TerminalState, handles creation/destruction,
 /// and provides batch operations for event draining and cursor blink updates.
 pub struct TerminalManager {
-    terminals: HashMap<PanelId, TerminalState>,
+    pub terminals: HashMap<PanelId, TerminalState>,
     project_dir: PathBuf,
+    pub history: CommandHistory,
 }
 
 impl TerminalManager {
     pub fn new(project_dir: PathBuf) -> Self {
+        let history_path = dirs::home_dir().map(|h| h.join(".myco").join("history.json"));
+        let history = CommandHistory::load(history_path.as_deref());
         Self {
             terminals: HashMap::new(),
             project_dir,
+            history,
         }
     }
 
@@ -91,6 +98,19 @@ impl TerminalManager {
     /// Get mutable access to the terminals map.
     pub fn terminals_mut(&mut self) -> &mut HashMap<PanelId, TerminalState> {
         &mut self.terminals
+    }
+
+    /// Access a terminal and history simultaneously (split borrow).
+    pub fn with_terminal_and_history(
+        &mut self,
+        panel_id: &PanelId,
+        f: impl FnOnce(&mut TerminalState, &CommandHistory),
+    ) {
+        let history: *const CommandHistory = &self.history;
+        if let Some(ts) = self.terminals.get_mut(panel_id) {
+            // SAFETY: history is only read, not mutated. ts and history don't alias.
+            f(ts, unsafe { &*history });
+        }
     }
 
     /// Update cursor blink state for all terminals.

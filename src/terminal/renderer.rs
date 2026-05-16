@@ -21,6 +21,7 @@ use super::colors::{resolve_bg, resolve_fg, AnsiPalette};
 use super::event_listener::MycoEventListener;
 use crate::grid::panel::PanelId;
 use crate::renderer::quad_renderer::QuadInstance;
+use crate::renderer::text_renderer::TextLabel;
 
 /// Snapshot of the terminal grid state, copied while the lock is held.
 ///
@@ -31,6 +32,37 @@ pub struct TerminalSnapshot {
     pub cursor_shape: CursorShape,
     pub display_offset: usize,
     pub cols: usize,
+}
+
+impl TerminalSnapshot {
+    /// Find the last row index that has non-whitespace content.
+    /// Returns the row index (0-based) or 0 if the terminal is empty.
+    pub fn last_content_row(&self) -> usize {
+        for (i, row) in self.rows.iter().enumerate().rev() {
+            for cell in row {
+                if cell.c != ' ' && cell.c != '\0' {
+                    return i;
+                }
+            }
+        }
+        0
+    }
+
+    /// Compute the Y offset to bottom-align terminal content.
+    /// Returns the pixel offset to add to viewport_y so content anchors to the bottom.
+    /// Reserves space below the content for the context pill row + bottom padding.
+    pub fn bottom_align_offset(&self, viewport_h: f32, cell_height: f32, pill_reserve: f32) -> f32 {
+        if self.rows.is_empty() {
+            return 0.0;
+        }
+        let content_rows = self.last_content_row() + 1;
+        let content_height = content_rows as f32 * cell_height + pill_reserve;
+        if content_height < viewport_h {
+            viewport_h - content_height
+        } else {
+            0.0
+        }
+    }
 }
 
 /// A single cell from the terminal grid snapshot.
@@ -560,9 +592,9 @@ impl TerminalRenderer {
 
         // Determine color based on whether this is a selection or flash
         let base_color = if let Some(opacity) = flash_opacity {
-            [0.5, 0.7, 1.0, 0.4 * opacity]
+            [0.741, 0.576, 0.976, 0.4 * opacity]
         } else {
-            [0.3, 0.5, 0.8, 0.3]
+            [0.267, 0.278, 0.353, 0.5]
         };
 
         // Get selection range
@@ -644,9 +676,9 @@ impl TerminalRenderer {
 
             let is_current = idx == current_match_idx;
             let color = if is_current {
-                [0.9, 0.7, 0.2, 0.5] // Bright yellow for current match
+                [0.945, 0.980, 0.549, 0.5] // #f1fa8c Dracula yellow, current match
             } else {
-                [0.7, 0.5, 0.1, 0.3] // Dimmer yellow for other matches
+                [0.945, 0.980, 0.549, 0.25] // #f1fa8c dimmed, other matches
             };
 
             quads.push(QuadInstance {
@@ -681,9 +713,120 @@ impl TerminalRenderer {
         vec![QuadInstance {
             position: [bar_x, bar_y],
             size: [bar_width, 28.0],
-            color: [0.2, 0.2, 0.25, 0.95], // Dark semi-transparent background
+            color: [0.157, 0.165, 0.212, 0.95],
             corner_radius: 4.0,
             _padding: 0.0,
         }]
+    }
+
+    /// Height of the context pill row in logical pixels (separator + pills + bottom pad).
+    pub const PILL_ROW_HEIGHT: f32 = 34.0;
+    /// Bottom padding below the pill row.
+    pub const BOTTOM_PAD: f32 = 8.0;
+    /// Total vertical space reserved below terminal content for pills + padding.
+    pub const PILL_RESERVE: f32 = Self::PILL_ROW_HEIGHT + Self::BOTTOM_PAD;
+
+    /// Build quads and labels for the context pill row (CWD + git info).
+    /// Rendered below the last content row with a separator line above.
+    pub fn build_context_pills(
+        &self,
+        display_cwd: &str,
+        git_info: Option<&(String, Option<(usize, usize, usize)>)>,
+        x: f32,
+        y: f32,
+        max_width: f32,
+    ) -> (Vec<QuadInstance>, Vec<TextLabel>) {
+        let mut quads = Vec::new();
+        let mut labels = Vec::new();
+
+        // Separator line above the pills
+        quads.push(QuadInstance {
+            position: [x, y],
+            size: [max_width, 1.0],
+            color: [0.384, 0.447, 0.643, 0.6],
+            corner_radius: 0.0,
+            _padding: 0.0,
+        });
+
+        let pill_h = 20.0;
+        let pill_y = y + 6.0 + (Self::PILL_ROW_HEIGHT - 6.0 - pill_h) / 2.0;
+        let pill_font = 11.0;
+        let pill_pad_h = 8.0; // horizontal padding inside pill
+        let pill_gap = 6.0; // gap between pills
+        let char_w = pill_font * 0.58;
+
+        let mut cursor_x = x;
+
+        // CWD pill
+        let cwd_text = format!("\u{1F4C2}\u{FE0E} {display_cwd}");
+        let cwd_w = (cwd_text.chars().count() as f32 * char_w + pill_pad_h * 2.0).min(max_width * 0.6);
+        quads.push(QuadInstance {
+            position: [cursor_x, pill_y],
+            size: [cwd_w, pill_h],
+            color: [0.267, 0.278, 0.353, 0.9],
+            corner_radius: 4.0,
+            _padding: 0.0,
+        });
+        labels.push(TextLabel {
+            text: cwd_text,
+            x: cursor_x + pill_pad_h,
+            y: pill_y + 2.0,
+            width: cwd_w - pill_pad_h * 2.0,
+            height: pill_h,
+            font_size: pill_font,
+            color: GlyphonColor::rgb(248, 248, 242),
+        });
+        cursor_x += cwd_w + pill_gap;
+
+        // Git branch pill
+        if let Some((branch, stats)) = git_info {
+            let branch_text = format!("\u{2387}\u{FE0E} {branch}");
+            let branch_w = branch_text.chars().count() as f32 * char_w + pill_pad_h * 2.0;
+            if cursor_x + branch_w < x + max_width {
+                quads.push(QuadInstance {
+                    position: [cursor_x, pill_y],
+                    size: [branch_w, pill_h],
+                    color: [0.267, 0.278, 0.353, 0.9],
+                    corner_radius: 4.0,
+                    _padding: 0.0,
+                });
+                labels.push(TextLabel {
+                    text: branch_text,
+                    x: cursor_x + pill_pad_h,
+                    y: pill_y + 2.0,
+                    width: branch_w - pill_pad_h * 2.0,
+                    height: pill_h,
+                    font_size: pill_font,
+                    color: GlyphonColor::rgb(248, 248, 242),
+                });
+                cursor_x += branch_w + pill_gap;
+            }
+
+            // Git stats pill (changed files, +insertions, -deletions)
+            if let Some((changed, ins, del)) = stats {
+                let stats_text = format!("\u{1F4C4}\u{FE0E} {changed} \u{2022} +{ins} -{del}");
+                let stats_w = stats_text.chars().count() as f32 * char_w + pill_pad_h * 2.0;
+                if cursor_x + stats_w < x + max_width {
+                    quads.push(QuadInstance {
+                        position: [cursor_x, pill_y],
+                        size: [stats_w, pill_h],
+                        color: [0.267, 0.278, 0.353, 0.9],
+                        corner_radius: 4.0,
+                        _padding: 0.0,
+                    });
+                    labels.push(TextLabel {
+                        text: stats_text,
+                        x: cursor_x + pill_pad_h,
+                        y: pill_y + 2.0,
+                        width: stats_w - pill_pad_h * 2.0,
+                        height: pill_h,
+                        font_size: pill_font,
+                        color: GlyphonColor::rgb(248, 248, 242),
+                    });
+                }
+            }
+        }
+
+        (quads, labels)
     }
 }

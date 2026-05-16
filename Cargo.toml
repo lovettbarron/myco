@@ -45,6 +45,10 @@ http = "1"
 
 # Vertex buffer data
 bytemuck = { version = "1", features = ["derive"] }
+dirs = "6.0.0"
+
+# Git integration
+git2 = "0.20"
 
 [profile.dev.package."*"]
 opt-level = 2

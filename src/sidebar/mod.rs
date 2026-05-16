@@ -49,7 +49,7 @@ impl SidebarState {
         expanded_dirs.insert(project_dir.join(".myco"));
 
         let mut state = Self {
-            visible: false, // Hidden by default, toggle with Cmd+B
+            visible: true, // Visible by default, toggle with Cmd+B
             entries: Vec::new(),
             selected: None,
             hovered: None,

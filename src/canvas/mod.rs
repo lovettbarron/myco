@@ -61,12 +61,16 @@ impl CanvasManager {
         // Create webview with custom protocol and IPC
         let webview = self.build_webview(window, bounds, panel_id, proxy)?;
 
-        // If .tldr file exists, load it into the webview
+        // If .tldr file exists, load it into the webview after TLDraw initializes
         if tldr_path.exists() {
             let content = std::fs::read_to_string(&tldr_path)?;
-            let escaped = content.replace('\\', "\\\\").replace('\'', "\\'");
+            let escaped = content
+                .replace('\\', "\\\\")
+                .replace('\'', "\\'")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
             let _ = webview.evaluate_script(&format!(
-                "setTimeout(() => window.__myco_load('{}'), 500)",
+                "(function tryLoad(){{if(window.__myco_load){{window.__myco_load('{}')}}else{{setTimeout(tryLoad,50)}}}})()",
                 escaped
             ));
         }

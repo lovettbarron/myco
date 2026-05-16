@@ -60,6 +60,22 @@ pub enum InputAction {
     TerminalSearchChar { panel_id: PanelId, ch: char },
     /// Backspace in search box.
     TerminalSearchBackspace { panel_id: PanelId },
+    /// Accept inline ghost text autocomplete suggestion (Right arrow).
+    AutocompleteAccept { panel_id: PanelId },
+    /// Open reverse history search (Ctrl+R).
+    HistorySearchOpen { panel_id: PanelId },
+    /// Close history search overlay.
+    HistorySearchClose { panel_id: PanelId },
+    /// Character typed in history search.
+    HistorySearchChar { panel_id: PanelId, ch: char },
+    /// Backspace in history search.
+    HistorySearchBackspace { panel_id: PanelId },
+    /// Next result in history search.
+    HistorySearchNext { panel_id: PanelId },
+    /// Previous result in history search.
+    HistorySearchPrev { panel_id: PanelId },
+    /// Accept selected history search result.
+    HistorySearchAccept { panel_id: PanelId },
     /// Start text selection at a grid point.
     TerminalSelectionStart { panel_id: PanelId, x: f32, y: f32, block: bool },
     /// Update selection endpoint.
@@ -76,6 +92,8 @@ pub enum InputAction {
     OpenMarkdown { path: PathBuf },
     /// Scroll markdown panel.
     MarkdownScroll { panel_id: PanelId, delta: f32 },
+    /// Zoom canvas panel (scroll wheel → zoom in/out).
+    CanvasZoom { panel_id: PanelId, delta: f32 },
     /// Markdown file changed on disk (from watcher).
     MarkdownFileChanged { path: PathBuf },
     /// Toggle sidebar visibility.
@@ -88,6 +106,18 @@ pub enum InputAction {
     FocusNextPanel,
     /// Cycle focus to previous panel.
     FocusPrevPanel,
+    /// Open a file in a new panel (from sidebar context menu).
+    SidebarOpenInPane { path: PathBuf },
+    /// Reveal file in macOS Finder.
+    SidebarRevealInFinder { path: PathBuf },
+    /// Rename a file or directory (from sidebar context menu).
+    SidebarRename { path: PathBuf },
+    /// Delete a file or directory (from sidebar context menu).
+    SidebarDelete { path: PathBuf },
+    /// Copy absolute path to clipboard.
+    SidebarCopyPath { path: PathBuf },
+    /// Copy relative path to clipboard.
+    SidebarCopyRelativePath { path: PathBuf },
     /// User accepted the project initialization prompt.
     InitPromptAccept,
     /// User dismissed the project initialization prompt.
