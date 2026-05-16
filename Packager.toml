@@ -1,0 +1,21 @@
+name = "myco"
+product-name = "Myco"
+identifier = "com.andrewlb.myco"
+version = "0.1.0"
+description = "AI-native project control surface"
+out-dir = "./dist"
+binaries-dir = "./target/release"
+before-packaging-command = "cargo build --release"
+
+[[binaries]]
+path = "myco"
+main = true
+
+[macos]
+minimum-system-version = "13.0"
+frameworks = []
+
+[dmg]
+window-size = { width = 600, height = 400 }
+app-position = { x = 180, y = 170 }
+application-folder-position = { x = 420, y = 170 }

@@ -12,3 +12,8 @@
 
 # Distribution output
 /dist/
+
+# Code signing credentials (never commit)
+*.p8
+*.pem
+*.p12
