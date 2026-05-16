@@ -14,18 +14,6 @@ pub struct TextLabel {
     pub color: GlyphonColor,
 }
 
-/// Metadata for a terminal text area, used to build TextArea references
-/// from pre-built Buffers during the prepare step.
-pub struct TerminalTextAreaMeta {
-    pub left: f32,
-    pub top: f32,
-    pub bounds_left: i32,
-    pub bounds_top: i32,
-    pub bounds_right: i32,
-    pub bounds_bottom: i32,
-    pub default_color: GlyphonColor,
-}
-
 /// GPU text rendering engine wrapping glyphon.
 ///
 /// Renders text labels into the wgpu render pass using cosmic-text for shaping
