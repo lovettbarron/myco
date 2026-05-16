@@ -34,6 +34,7 @@ use crate::markdown::{MarkdownManager, MarkdownRenderer};
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
 use crate::theme::Theme;
+use crate::watcher::FileWatcher;
 use crate::window::create_window;
 
 /// Height of the app title bar in logical points.
@@ -121,6 +122,8 @@ pub struct App {
     terminal_renderer: TerminalRenderer,
     /// GPU markdown renderer (buffer caching, quad generation for code blocks/blockquotes/HRs).
     markdown_renderer: crate::markdown::renderer::MarkdownRenderer,
+    /// File watcher monitoring the project directory for changes.
+    file_watcher: Option<FileWatcher>,
     /// Proxy for waking the event loop from background threads.
     proxy: Option<EventLoopProxy<UserEvent>>,
     /// Pending actions to process after the current action completes.
@@ -154,6 +157,7 @@ impl App {
             pending_actions: Vec::new(),
             terminal_renderer: TerminalRenderer::new(),
             markdown_renderer: crate::markdown::renderer::MarkdownRenderer::new(),
+            file_watcher: None,
             proxy: Some(proxy),
             redraw_pending: false,
             frame_stats: FrameStats::new(),
@@ -1373,7 +1377,20 @@ impl ApplicationHandler<UserEvent> for App {
         let mut tm = TerminalManager::new(project_dir.clone());
 
         // Create canvas manager for TLDraw webview panels
-        self.canvas_manager = Some(CanvasManager::new(project_dir));
+        self.canvas_manager = Some(CanvasManager::new(project_dir.clone()));
+
+        // Start file watcher for live markdown updates (CAP-04)
+        if let Some(proxy) = &self.proxy {
+            match FileWatcher::new(&project_dir, proxy.clone()) {
+                Ok(watcher) => {
+                    self.file_watcher = Some(watcher);
+                }
+                Err(e) => {
+                    // No user-visible error per UI-SPEC: log via tracing::warn
+                    warn!("Failed to start file watcher: {}", e);
+                }
+            }
+        }
 
         // Create terminal in the initial panel
         let (_, _, pw, ph) = grid.get_panel_rect(grid.panel_nodes()[0].0);

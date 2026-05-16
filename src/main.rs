@@ -7,6 +7,7 @@ mod platform;
 mod renderer;
 mod terminal;
 mod theme;
+mod watcher;
 mod window;
 
 use tracing::info;
