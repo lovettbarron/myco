@@ -88,6 +88,10 @@ pub enum InputAction {
     FocusNextPanel,
     /// Cycle focus to previous panel.
     FocusPrevPanel,
+    /// User accepted the project initialization prompt.
+    InitPromptAccept,
+    /// User dismissed the project initialization prompt.
+    InitPromptDismiss,
 }
 
 /// Cursor styles for different interaction states.

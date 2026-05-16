@@ -50,6 +50,11 @@ impl CanvasManager {
         let canvas_dir = self.project_dir.join(".myco").join("canvas");
         std::fs::create_dir_all(&canvas_dir)?;
 
+        // Ensure .myco/context/ has default AI context files
+        if let Err(e) = crate::context::ensure_context_files(&self.project_dir) {
+            tracing::warn!("Failed to write context files: {}", e);
+        }
+
         let tldr_path = canvas_dir.join(format!("{}.tldr", canvas_id));
         let state = CanvasState::new(canvas_id.to_string(), tldr_path.clone());
 

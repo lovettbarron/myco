@@ -22,6 +22,8 @@ pub enum UserEvent {
     TerminalEvent,
     FileChanged(Vec<std::path::PathBuf>),
     CanvasMessage(PanelId, String),
+    #[cfg(target_os = "macos")]
+    MenuAction(u32),
 }
 use crate::input::keyboard;
 use crate::input::mouse::MouseState;
@@ -42,8 +44,20 @@ use crate::window::create_window;
 /// Height of the app title bar in logical points.
 const TITLE_BAR_HEIGHT: f32 = 38.0;
 
+/// Whether the project initialization prompt is being shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InitPrompt {
+    /// No prompt — either `.myco` exists or user dismissed it.
+    None,
+    /// Prompt is visible, waiting for user input.
+    Showing,
+}
+
 /// Height of the panel title bar area in logical points.
 const PANEL_TITLE_HEIGHT: f32 = 28.0;
+
+/// Horizontal padding inside panel content areas (e.g. terminal text inset from panel edge).
+const PANEL_CONTENT_PADDING: f32 = 8.0;
 
 /// Accumulates per-frame performance metrics (frame stats) for periodic logging.
 ///
@@ -143,6 +157,13 @@ pub struct App {
     frame_stats: FrameStats,
     /// Display scale factor (2.0 on Retina, 1.0 on standard displays).
     scale_factor: f32,
+    /// Project initialization prompt state.
+    init_prompt: InitPrompt,
+    /// Project directory path (set during resumed()).
+    project_dir: Option<std::path::PathBuf>,
+    /// Menu bar state (action map and toggle entries).
+    #[cfg(target_os = "macos")]
+    menu_state: Option<crate::platform::menu::MenuState>,
 }
 
 impl App {
@@ -173,6 +194,10 @@ impl App {
             redraw_pending: false,
             frame_stats: FrameStats::new(),
             scale_factor: 1.0,
+            init_prompt: InitPrompt::None,
+            project_dir: None,
+            #[cfg(target_os = "macos")]
+            menu_state: None,
         }
     }
 }
@@ -418,7 +443,7 @@ impl App {
                             if let Some(node_id) = grid.find_node(panel_id) {
                                 let (_, _, pw, ph) = grid.get_panel_rect(node_id);
                                 let cols =
-                                    (pw / ts.cell_width).max(2.0) as usize;
+                                    ((pw - PANEL_CONTENT_PADDING * 2.0) / ts.cell_width).max(2.0) as usize;
                                 let rows = ((ph - PANEL_TITLE_HEIGHT) / ts.cell_height)
                                     .max(1.0) as usize;
                                 let dims =
@@ -460,7 +485,7 @@ impl App {
                                         let (_, _, pw, ph) = grid.get_panel_rect(node_id);
                                         let cw = self.terminal_renderer.cell_width;
                                         let ch = self.terminal_renderer.cell_height;
-                                        let cols = (pw / cw).max(2.0) as usize;
+                                        let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cw).max(2.0) as usize;
                                         let rows = ((ph - PANEL_TITLE_HEIGHT) / ch)
                                             .max(1.0)
                                             as usize;
@@ -518,7 +543,7 @@ impl App {
 
                         if let Some(node) = grid.find_node(panel_id) {
                             let (px, py, _pw, _ph) = grid.get_panel_rect(node);
-                            let viewport_x = px;
+                            let viewport_x = px + PANEL_CONTENT_PADDING;
                             let viewport_y =
                                 py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
                             let display_offset =
@@ -550,7 +575,7 @@ impl App {
                     if let Some(ts) = tm.get_mut(&panel_id) {
                         if let Some(node) = grid.find_node(panel_id) {
                             let (px, py, _pw, _ph) = grid.get_panel_rect(node);
-                            let viewport_x = px;
+                            let viewport_x = px + PANEL_CONTENT_PADDING;
                             let viewport_y =
                                 py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
                             let display_offset =
@@ -792,6 +817,8 @@ impl App {
                     sidebar.toggle();
                     self.recompute_layout();
                 }
+                #[cfg(target_os = "macos")]
+                self.update_menu_toggles();
             }
             InputAction::SidebarSelect { path } => {
                 // T-03-09: Validate path is within project directory
@@ -862,7 +889,78 @@ impl App {
                     }
                 }
             }
+            InputAction::InitPromptAccept => {
+                if let Some(project_dir) = &self.project_dir {
+                    let myco_dir = project_dir.join(".myco");
+                    if let Err(e) = std::fs::create_dir_all(myco_dir.join("canvas")) {
+                        warn!("Failed to create .myco/canvas: {}", e);
+                    }
+                    if let Err(e) = crate::context::ensure_context_files(project_dir) {
+                        warn!("Failed to write context files: {}", e);
+                    }
+                    info!("Initialized .myco project folder");
+                    // Refresh sidebar to show the new directory
+                    if let Some(sidebar) = &mut self.sidebar {
+                        sidebar.refresh_file_tree();
+                    }
+                }
+                self.init_prompt = InitPrompt::None;
+            }
+            InputAction::InitPromptDismiss => {
+                info!("Project initialization skipped by user");
+                self.init_prompt = InitPrompt::None;
+            }
         }
+    }
+
+    /// Handle a menu bar action by tag, resolving to InputAction.
+    #[cfg(target_os = "macos")]
+    fn handle_menu_action(&mut self, tag: u32) {
+        let action_name = {
+            let menu_state = match &self.menu_state {
+                Some(s) => s,
+                None => return,
+            };
+            match menu_state.action_map.get(&tag) {
+                Some(name) => name.clone(),
+                None => return,
+            }
+        };
+        let panel_id = self.focused_panel.unwrap_or(PanelId(0));
+        let input_action = match action_name.as_str() {
+            "create_terminal" => Some(InputAction::CreateTerminal),
+            "create_canvas" => Some(InputAction::CreateCanvas),
+            "close_panel" => Some(InputAction::PanelClose { panel_id }),
+            "toggle_sidebar" => Some(InputAction::ToggleSidebar),
+            "split_horizontal" => Some(InputAction::PanelSplitHorizontal { panel_id }),
+            "split_vertical" => Some(InputAction::PanelSplitVertical { panel_id }),
+            "focus_next" => Some(InputAction::FocusNextPanel),
+            "focus_prev" => Some(InputAction::FocusPrevPanel),
+            "toggle_fullscreen" => Some(InputAction::PanelToggleFullscreen { panel_id }),
+            "copy" => Some(InputAction::TerminalCopy { panel_id }),
+            "paste" => Some(InputAction::TerminalPaste { panel_id }),
+            "find" => Some(InputAction::TerminalSearchOpen { panel_id }),
+            "font_size_up" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: 1.0 }),
+            "font_size_down" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: -1.0 }),
+            "init_project" => Some(InputAction::InitPromptAccept),
+            _ => None,
+        };
+        if let Some(action) = input_action {
+            self.process_action(action);
+        }
+    }
+
+    /// Update menu bar toggle labels to reflect current app state.
+    #[cfg(target_os = "macos")]
+    fn update_menu_toggles(&self) {
+        let menu_state = match &self.menu_state {
+            Some(s) => s,
+            None => return,
+        };
+        let mut state_map = std::collections::HashMap::new();
+        let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
+        state_map.insert("sidebar_visible".to_string(), sidebar_visible);
+        crate::platform::menu::update_toggle_labels(menu_state, &state_map);
     }
 
     /// Get the content bounds (below panel title) for a panel in logical pixels.
@@ -872,9 +970,9 @@ impl App {
             if let Some(node_id) = grid.find_node(panel_id) {
                 let (x, y, w, h) = grid.get_panel_rect(node_id);
                 let sidebar_offset = self.sidebar_offset();
-                let content_x = x + sidebar_offset;
+                let content_x = x + sidebar_offset + PANEL_CONTENT_PADDING;
                 let content_y = y + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
-                let content_w = w;
+                let content_w = w - PANEL_CONTENT_PADDING * 2.0;
                 let content_h = h - PANEL_TITLE_HEIGHT;
                 return (content_x, content_y, content_w, content_h);
             }
@@ -964,7 +1062,8 @@ impl App {
             for &(node, panel_id) in grid.panel_nodes() {
                 if let Some(ts) = tm.get_mut(&panel_id) {
                     let (_, _, pw, ph) = grid.get_panel_rect(node);
-                    let cols = (pw / ts.cell_width).max(2.0) as usize;
+                    let usable_w = pw - PANEL_CONTENT_PADDING * 2.0;
+                    let cols = (usable_w / ts.cell_width).max(2.0) as usize;
                     let rows =
                         ((ph - PANEL_TITLE_HEIGHT) / ts.cell_height).max(1.0) as usize;
                     let dims = crate::terminal::state::TermDimensions { cols, rows };
@@ -1080,9 +1179,9 @@ impl App {
                                 let term_quads =
                                     self.terminal_renderer.build_terminal_quads(
                                         snapshot,
-                                        px,
+                                        px + PANEL_CONTENT_PADDING,
                                         content_y,
-                                        pw,
+                                        pw - PANEL_CONTENT_PADDING * 2.0,
                                         content_h,
                                         self.theme.panel_background,
                                         ts.cursor_blink_visible,
@@ -1099,7 +1198,7 @@ impl App {
                                 let sel_quads =
                                     self.terminal_renderer.build_selection_quads(
                                         &term,
-                                        px,
+                                        px + PANEL_CONTENT_PADDING,
                                         content_y,
                                         ts.cell_width,
                                         ts.cell_height,
@@ -1147,7 +1246,7 @@ impl App {
                                     .build_search_quads(
                                         ts.search.match_positions(),
                                         ts.search.current_match_index(),
-                                        px,
+                                        px + PANEL_CONTENT_PADDING,
                                         content_y,
                                         ts.cell_width,
                                         ts.cell_height,
@@ -1249,13 +1348,45 @@ impl App {
             }
         }
 
+        // Init prompt overlay
+        if self.init_prompt == InitPrompt::Showing {
+            // Semi-transparent backdrop
+            quads.push(QuadInstance {
+                position: [0.0, 0.0],
+                size: [width, height],
+                color: [0.0, 0.0, 0.0, 0.5],
+                corner_radius: 0.0,
+                _padding: 0.0,
+            });
+            // Dialog box
+            let dialog_w = 420.0;
+            let dialog_h = 140.0;
+            let dialog_x = (width - dialog_w) / 2.0;
+            let dialog_y = (height - dialog_h) / 2.0;
+            quads.push(QuadInstance {
+                position: [dialog_x, dialog_y],
+                size: [dialog_w, dialog_h],
+                color: [0.16, 0.16, 0.18, 1.0],
+                corner_radius: 8.0,
+                _padding: 0.0,
+            });
+            // Border accent
+            quads.push(QuadInstance {
+                position: [dialog_x, dialog_y],
+                size: [dialog_w, 3.0],
+                color: [0.45, 0.60, 0.85, 1.0],
+                corner_radius: 0.0,
+                _padding: 0.0,
+            });
+        }
+
         quads
     }
 
     /// Build text labels for the current frame.
     #[tracing::instrument(skip_all, level = "trace")]
     #[allow(clippy::unused_self)]
-    fn build_labels(&self, _width: f32, _height: f32) -> Vec<TextLabel> {
+    fn build_labels(&self, width: f32, height: f32) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let grid = match &self.grid {
             Some(g) => g,
@@ -1265,7 +1396,7 @@ impl App {
         // Title bar breadcrumb (D-14): "Myco > Untitled Project"
         labels.push(TextLabel {
             text: "Myco > Untitled Project".to_string(),
-            x: 80.0,
+            x: 100.0,
             y: 10.0,
             width: 300.0,
             height: TITLE_BAR_HEIGHT,
@@ -1438,6 +1569,44 @@ impl App {
             }
         }
 
+        // Init prompt labels
+        if self.init_prompt == InitPrompt::Showing {
+            let dialog_w = 420.0;
+            let dialog_h = 140.0;
+            let dialog_x = (width - dialog_w) / 2.0;
+            let dialog_y = (height - dialog_h) / 2.0;
+            let text_color = glyphon::Color::rgba(220, 220, 224, 255);
+            let dim_color = glyphon::Color::rgba(140, 140, 150, 255);
+
+            labels.push(TextLabel {
+                text: "Initialize project?".to_string(),
+                x: dialog_x + 20.0,
+                y: dialog_y + 16.0,
+                width: dialog_w - 40.0,
+                height: 24.0,
+                font_size: 16.0,
+                color: text_color,
+            });
+            labels.push(TextLabel {
+                text: "Create .myco folder with canvas and AI context files.".to_string(),
+                x: dialog_x + 20.0,
+                y: dialog_y + 48.0,
+                width: dialog_w - 40.0,
+                height: 20.0,
+                font_size: 13.0,
+                color: dim_color,
+            });
+            labels.push(TextLabel {
+                text: "[Y / Enter] Initialize    [N / Esc] Skip".to_string(),
+                x: dialog_x + 20.0,
+                y: dialog_y + 100.0,
+                width: dialog_w - 40.0,
+                height: 20.0,
+                font_size: 12.0,
+                color: dim_color,
+            });
+        }
+
         labels
     }
 }
@@ -1456,10 +1625,13 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(mm) = &mut self.markdown_manager {
                     mm.handle_file_changed(&paths);
                 }
-                // Refresh sidebar file tree on file system changes
                 if let Some(sidebar) = &mut self.sidebar {
                     sidebar.refresh_file_tree();
                 }
+            }
+            #[cfg(target_os = "macos")]
+            UserEvent::MenuAction(tag) => {
+                self.handle_menu_action(tag);
             }
         }
         // Drain pending actions (from IPC shortcut forwarding)
@@ -1531,6 +1703,15 @@ impl ApplicationHandler<UserEvent> for App {
         // Create terminal manager with current directory as project dir (D-02)
         let project_dir =
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        self.project_dir = Some(project_dir.clone());
+
+        // Check if .myco folder exists — if not, prompt user to initialize
+        let myco_dir = project_dir.join(".myco");
+        if !myco_dir.exists() {
+            self.init_prompt = InitPrompt::Showing;
+            info!("No .myco folder found — showing initialization prompt");
+        }
+
         let mut tm = TerminalManager::new(project_dir.clone());
 
         // Create canvas manager for TLDraw webview panels
@@ -1554,7 +1735,7 @@ impl ApplicationHandler<UserEvent> for App {
 
         // Create terminal in the initial panel
         let (_, _, pw, ph) = grid.get_panel_rect(grid.panel_nodes()[0].0);
-        let cols = (pw / cell_width).max(2.0) as usize;
+        let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cell_width).max(2.0) as usize;
         let rows = ((ph - PANEL_TITLE_HEIGHT) / cell_height).max(1.0) as usize;
         if let Err(e) = tm.create_terminal(PanelId(0), cols, rows) {
             warn!("Failed to create initial terminal: {}", e);
@@ -1570,6 +1751,14 @@ impl ApplicationHandler<UserEvent> for App {
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.grid = Some(grid);
+
+        // Set up native menu bar
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(proxy) = &self.proxy {
+                self.menu_state = Some(crate::platform::menu::setup_menu_bar(proxy.clone()));
+            }
+        }
 
         info!("Application initialization complete with terminal");
     }
@@ -1635,6 +1824,11 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
+                // Block mouse input while init prompt is showing
+                if self.init_prompt == InitPrompt::Showing {
+                    return;
+                }
+
                 let lx = self.mouse_state.cursor_x as f32;
                 let ly = self.mouse_state.cursor_y as f32;
 
@@ -1752,6 +1946,24 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
+                // Intercept keys when the init prompt is showing
+                if self.init_prompt == InitPrompt::Showing && event.state == ElementState::Pressed {
+                    use winit::keyboard::{Key, NamedKey};
+                    let accepted = matches!(&event.logical_key, Key::Named(NamedKey::Enter))
+                        || matches!(&event.logical_key, Key::Character(c) if c.as_str() == "y" || c.as_str() == "Y");
+                    let dismissed = matches!(&event.logical_key, Key::Named(NamedKey::Escape))
+                        || matches!(&event.logical_key, Key::Character(c) if c.as_str() == "n" || c.as_str() == "N");
+                    if accepted {
+                        self.process_action(InputAction::InitPromptAccept);
+                    } else if dismissed {
+                        self.process_action(InputAction::InitPromptDismiss);
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+
                 let panel_type = self.focused_panel_type();
                 let search_open = self
                     .focused_panel
@@ -1877,9 +2089,9 @@ impl ApplicationHandler<UserEvent> for App {
                                                     panel_id,
                                                     font_system,
                                                     snapshot,
-                                                    px + sidebar_off,
+                                                    px + sidebar_off + PANEL_CONTENT_PADDING,
                                                     content_y,
-                                                    pw,
+                                                    pw - PANEL_CONTENT_PADDING * 2.0,
                                                     content_h,
                                                     ts.font_size,
                                                     ts.cell_width,

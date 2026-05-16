@@ -1,0 +1,64 @@
+{
+  "menus": [
+    {
+      "title": "Myco",
+      "system": true,
+      "items": [
+        { "label": "About Myco", "action": "about" },
+        { "separator": true },
+        { "label": "Quit Myco", "action": "quit", "key": "q" }
+      ]
+    },
+    {
+      "title": "File",
+      "items": [
+        { "label": "New Terminal", "action": "create_terminal", "key": "t" },
+        { "label": "New Canvas", "action": "create_canvas", "key": "t", "modifiers": "cmd+shift" },
+        { "separator": true },
+        { "label": "Initialize Project", "action": "init_project" },
+        { "separator": true },
+        { "label": "Close Tab", "action": "close_panel", "key": "w" }
+      ]
+    },
+    {
+      "title": "Edit",
+      "items": [
+        { "label": "Copy", "action": "copy", "key": "c" },
+        { "label": "Paste", "action": "paste", "key": "v" },
+        { "separator": true },
+        { "label": "Find", "action": "find", "key": "f" }
+      ]
+    },
+    {
+      "title": "View",
+      "items": [
+        {
+          "label": "Show File Browser", "action": "toggle_sidebar", "key": "b",
+          "toggle": { "state_key": "sidebar_visible", "on_label": "Hide File Browser", "off_label": "Show File Browser" }
+        },
+        { "separator": true },
+        { "label": "Increase Font Size", "action": "font_size_up", "key": "=", "modifiers": "cmd" },
+        { "label": "Decrease Font Size", "action": "font_size_down", "key": "-", "modifiers": "cmd" }
+      ]
+    },
+    {
+      "title": "Tab",
+      "items": [
+        { "label": "Split Right", "action": "split_horizontal", "key": "d" },
+        { "label": "Split Down", "action": "split_vertical", "key": "d", "modifiers": "cmd+shift" },
+        { "separator": true },
+        { "label": "Next Tab", "action": "focus_next", "key": "]" },
+        { "label": "Previous Tab", "action": "focus_prev", "key": "[" },
+        { "separator": true },
+        { "label": "Toggle Fullscreen", "action": "toggle_fullscreen", "key": "Escape", "modifiers": "" }
+      ]
+    },
+    {
+      "title": "Window",
+      "items": [
+        { "label": "Minimize", "action": "minimize", "key": "m" },
+        { "label": "Zoom", "action": "zoom" }
+      ]
+    }
+  ]
+}
