@@ -70,12 +70,18 @@ Plans:
   2. User can open a Markdown viewer panel that renders .md files with Obsidian-flavored formatting
   3. Markdown viewer updates live when the underlying file changes on disk
   4. User can have terminal, canvas, and markdown panels open simultaneously with correct keyboard focus routing between GPU and webview panels
-**Plans**: TBD
+**Plans**: 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+**Wave 1**
+- [ ] 03-01-PLAN.md -- TLDraw canvas via wry webview (bundled assets, custom protocol, IPC auto-save, focus routing)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 03-02-PLAN.md -- GPU-rendered markdown viewer with live file updates (pulldown-cmark parser, glyphon rendering, notify watcher)
+
+**Wave 3** *(blocked on Waves 1+2 completion)*
+- [ ] 03-03-PLAN.md -- File sidebar and focus polish (GPU-rendered file tree, click-to-open, panel desaturation, focus cycling)
 
 ### Phase 4: Application Frame and Theming
 **Goal**: User sees a complete application shell with navigation, status information, and visual themes
@@ -137,7 +143,7 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 |-------|----------------|--------|-----------|
 | 1. Window, Grid, and Build Pipeline | 0/4 | Planning complete | - |
 | 2. Terminal Cap | 2/2 | Complete   | 2026-05-16 |
-| 3. Webview Caps | 0/2 | Not started | - |
+| 3. Webview Caps | 0/3 | Planning complete | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |
 | 5. Configuration and Persistence | 0/2 | Not started | - |
 | 6. AI Monitoring and Ship | 0/1 | Not started | - |
