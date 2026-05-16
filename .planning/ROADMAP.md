@@ -51,11 +51,11 @@ Plans:
   3. User can scroll back through terminal history and search within scrollback with highlighted matches
   4. User can copy/paste text with Cmd+C/V, select text via mouse (line and rectangular), and configure font and size
   5. Terminal correctly renders Unicode text including CJK characters and supports cursor style switching via escape sequences
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md -- Working terminal core (PTY lifecycle, GPU character rendering, keyboard input, cursor)
+- [ ] 02-02-PLAN.md -- Terminal interaction (scrollback, selection, clipboard, search overlay, font config)
 
 ### Phase 3: Webview Caps
 **Goal**: User can sketch on a canvas and view documents alongside the terminal in the same window
@@ -133,7 +133,7 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Window, Grid, and Build Pipeline | 0/4 | Planning complete | - |
-| 2. Terminal Cap | 0/2 | Not started | - |
+| 2. Terminal Cap | 0/2 | Planning complete | - |
 | 3. Webview Caps | 0/2 | Not started | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |
 | 5. Configuration and Persistence | 0/2 | Not started | - |
