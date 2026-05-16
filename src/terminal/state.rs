@@ -12,7 +12,7 @@ use alacritty_terminal::event::WindowSize;
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
+use alacritty_terminal::term::{Config as TermConfig, Term, TermDamage, TermMode};
 use alacritty_terminal::tty;
 use tracing::{debug, warn};
 
@@ -84,6 +84,9 @@ pub struct TerminalState {
     // --- Search state (D-09) ---
     /// Search overlay state machine.
     pub search: crate::terminal::search::SearchState,
+
+    /// Whether the terminal grid has visual damage since last render.
+    content_dirty: bool,
 
     /// Event listener handle for clearing the wake coalescing flag.
     event_listener: MycoEventListener,
@@ -170,6 +173,7 @@ impl TerminalState {
             has_new_output_while_scrolled: false,
             copy_flash_start: None,
             search: crate::terminal::search::SearchState::new(),
+            content_dirty: true,
             event_listener: listener_handle,
         })
     }
@@ -179,46 +183,59 @@ impl TerminalState {
     /// Called in the main thread's about_to_wait handler.
     /// Handles terminal events like exit, cursor blink changes, etc.
     pub fn drain_events(&mut self) -> bool {
-        let mut had_events = false;
+        let mut had_wakeup = false;
+        let mut had_meaningful_event = false;
         while let Ok(event) = self.event_rx.try_recv() {
-            had_events = true;
             match event {
                 alacritty_terminal::event::Event::Exit => {
                     debug!("Terminal: Exit event received");
                     self.exited = true;
+                    had_meaningful_event = true;
                 }
                 alacritty_terminal::event::Event::ChildExit(status) => {
                     debug!("Terminal: ChildExit event received: {:?}", status);
                     self.exited = true;
                     self.exit_code = status.code();
+                    had_meaningful_event = true;
                 }
                 alacritty_terminal::event::Event::CursorBlinkingChange => {
-                    // Read the authoritative blink state from CursorStyle
                     let term = self.term.lock();
                     self.cursor_blink_enabled = term.cursor_style().blinking;
                     debug!(
                         "Terminal: CursorBlinkingChange, enabled={}",
                         self.cursor_blink_enabled
                     );
+                    had_meaningful_event = true;
                 }
                 alacritty_terminal::event::Event::Wakeup => {
-                    // Terminal content changed, redraw needed
-                    // (request_redraw already happens in about_to_wait)
+                    had_wakeup = true;
                 }
                 alacritty_terminal::event::Event::Title(title) => {
                     debug!("Terminal: Title changed to {:?}", title);
-                    // TODO: Update panel title in future
                 }
                 other => {
                     debug!("Terminal: Unhandled event: {:?}", other);
                 }
             }
         }
-        // Track new output indicator (D-10)
-        if had_events {
+
+        if had_wakeup {
+            let mut term = self.term.lock();
+            let damaged = match term.damage() {
+                TermDamage::Full => true,
+                TermDamage::Partial(iter) => iter.count() > 0,
+            };
+            term.reset_damage();
+            if damaged {
+                self.content_dirty = true;
+            }
+        }
+
+        let needs_render = std::mem::take(&mut self.content_dirty) || had_meaningful_event;
+        if needs_render {
             self.on_new_output();
         }
-        had_events
+        needs_render
     }
 
     /// Update cursor blink state based on elapsed time.

@@ -44,12 +44,12 @@ Declared values (must be multiples of 4):
 | 3xl | 64px | Page-level spacing (not used in Phase 3) |
 
 Exceptions:
-- TITLE_BAR_HEIGHT = 38px (established Phase 1, not on scale -- platform-level constant)
-- PANEL_TITLE_HEIGHT = 28px (established Phase 1, not on scale -- panel chrome constant)
-- DIVIDER_VISUAL_WIDTH = 1px (established Phase 1 -- subpixel element)
-- Close/fullscreen buttons = 16x16px at 6px inset from panel top edge (established Phase 1)
 - SIDEBAR_WIDTH = 240px (new -- fixed sidebar width, outside 8-point scale due to content-driven sizing)
-- Sidebar item height = 28px (matches PANEL_TITLE_HEIGHT for visual consistency)
+- Sidebar item height = 28px (matches Phase 1 PANEL_TITLE_HEIGHT for visual consistency)
+- DIVIDER_VISUAL_WIDTH = 1px (inherited from Phase 1 -- subpixel rendering element that does not participate in layout spacing; it is a visual separator rendered as a single-pixel line between grid cells, not a spacing value)
+
+**Phase 1 inherited constants (not redeclared here; see Phase 1 UI-SPEC):**
+- TITLE_BAR_HEIGHT (38px), PANEL_TITLE_HEIGHT (28px), close/fullscreen button inset (6px), and other Phase 1 panel chrome values are inherited as-is. This spec does not redeclare them. Phase 3 components reference these constants from the existing theme/layout code.
 
 ---
 
@@ -57,43 +57,56 @@ Exceptions:
 
 All font sizes are in logical pixels. Rendering uses glyphon `Metrics::new(font_size, line_height_px)`.
 
-### UI Chrome Typography (existing, unchanged)
+Phase 3 uses exactly **4 font sizes** and **2 font weights**:
 
-| Role | Size | Weight | Line Height | Usage |
-|------|------|--------|-------------|-------|
-| Title bar | 13px | 400 (regular) | 1.3 (16.9px) | Window title breadcrumb |
-| Panel title | 12px | 400 (regular) | 1.3 (15.6px) | Panel type label in title bar |
-| UI label | 11px | 400 (regular) | 1.3 (14.3px) | Metadata, status indicators, keyboard hints |
-| Panel content | 14px | 400 (regular) | 1.3 (18.2px) | Default content text (terminal uses its own font config) |
+| Role | Size | Weight | Line Height | Justification |
+|------|------|--------|-------------|---------------|
+| Label | 12px | 400 or 600 | 1.3 (15.6px) | UI chrome: panel titles, sidebar section headings ("FILES"), window title breadcrumb, metadata labels. Smallest readable size for secondary UI text. |
+| Body | 14px | 400 or 600 | 1.5 (21px) | Primary content text: markdown body paragraphs, file/folder names in sidebar, code blocks (mono), blockquote text, list items. The default reading size for content. |
+| Heading | 20px | 600 | 1.2 (24px) | All markdown headings H2 through H6. A single heading size creates clear hierarchy against 14px body without requiring a separate size per heading level. H2-H3 use this size at semibold; H4-H6 use this size at regular weight for subtle demotion. |
+| Display | 28px | 600 | 1.2 (33.6px) | Markdown H1 only. Reserved for top-level document titles. The largest size, used sparingly -- typically once per document. |
 
-### Markdown Viewer Typography (new)
+Font weights used: **400 (regular)** and **600 (semibold)**. Two weights only.
 
-| Role | Size | Weight | Line Height | Font Family | Usage |
-|------|------|--------|-------------|-------------|-------|
-| H1 | 28px | 600 (semibold) | 1.2 (33.6px) | SansSerif | Top-level headings |
-| H2 | 22px | 600 (semibold) | 1.2 (26.4px) | SansSerif | Section headings |
-| H3 | 18px | 600 (semibold) | 1.3 (23.4px) | SansSerif | Subsection headings |
-| H4/H5/H6 | 16px | 600 (semibold) | 1.3 (20.8px) | SansSerif | Minor headings |
-| Body | 15px | 400 (regular) | 1.6 (24px) | SansSerif | Paragraph text, list items |
-| Code inline | 14px | 400 (regular) | 1.5 (21px) | Monospace | Inline `code` spans |
-| Code block | 14px | 400 (regular) | 1.5 (21px) | Monospace | Fenced code blocks |
-| Blockquote | 15px | 400 (regular) | 1.6 (24px) | SansSerif | Blockquoted text (italic style) |
+### Size Mapping (all elements)
 
-Font weights used: 400 (regular) and 600 (semibold). Two weights only.
+| Element | Size | Weight | Font Family | Notes |
+|---------|------|--------|-------------|-------|
+| Window title breadcrumb | 12px | 400 | SansSerif | UI chrome |
+| Panel title label | 12px | 400 | SansSerif | UI chrome |
+| Sidebar section heading ("FILES") | 12px | 600 | SansSerif | UI chrome, semibold for label emphasis |
+| Metadata / status indicators | 12px | 400 | SansSerif | UI chrome |
+| Markdown body paragraph | 14px | 400 | SansSerif | Content |
+| Markdown list items | 14px | 400 | SansSerif | Content |
+| Markdown blockquote | 14px | 400 | SansSerif | Content, italic style applied |
+| Markdown inline code | 14px | 400 | Monospace | Content |
+| Markdown code block | 14px | 400 | Monospace | Content |
+| File entry (sidebar) | 14px | 400 | SansSerif | Content |
+| File entry selected (sidebar) | 14px | 600 | SansSerif | Content, semibold for selection emphasis |
+| "New Canvas" button (sidebar) | 14px | 400 | SansSerif | Content |
+| Markdown H2 | 20px | 600 | SansSerif | Heading |
+| Markdown H3 | 20px | 600 | SansSerif | Heading |
+| Markdown H4/H5/H6 | 20px | 400 | SansSerif | Heading, regular weight for subtle demotion |
+| Markdown H1 | 28px | 600 | SansSerif | Display |
 
-### File Sidebar Typography (new)
+### Line Height Rules
 
-| Role | Size | Weight | Line Height | Usage |
-|------|------|--------|-------------|-------|
-| Sidebar heading | 11px | 600 (semibold) | 1.3 (14.3px) | Section labels ("FILES", "CANVASES") |
-| File entry | 13px | 400 (regular) | 1.3 (16.9px) | File and folder names |
-| File entry (selected) | 13px | 600 (semibold) | 1.3 (16.9px) | Currently selected/open file |
+| Size | Line Height Ratio | Computed | Rationale |
+|------|-------------------|----------|-----------|
+| 12px | 1.3 | 15.6px | Compact UI chrome; matches Phase 1 established ratio |
+| 14px | 1.5 | 21px | Comfortable reading line height for body content |
+| 20px | 1.2 | 24px | Tighter heading line height; headings are short runs |
+| 28px | 1.2 | 33.6px | Tighter display line height; H1 is a single line |
 
 ---
 
 ## Color
 
 All colors expressed as `[f32; 4]` RGBA (0.0-1.0 range) for GPU rendering and as hex for reference.
+
+**Color distribution: 60% dominant background (#1A1A1E), 30% panel secondary (#242428), 10% accent (#666673) -- accent restricted to the 4 elements listed under "Accent Reserved For" below.**
+
+**Primary visual anchor: the focused panel at full color saturation. All other panels recede via the semi-transparent overlay (GPU panels) or CSS desaturation filter (webview panels).** This creates an immediate focal point without adding border chrome or highlight colors. The user's eye is drawn to the one panel at full brightness while the remaining panels fade to a dim, desaturated state.
 
 ### Existing Palette (from src/theme.rs, unchanged)
 
@@ -177,8 +190,8 @@ TLDraw ships its own dark mode. Use `<Tldraw inferDarkMode />` to auto-detect, o
 | Panel title -- canvas | "Canvas" (static label, matching terminal's "Terminal" pattern) |
 | Panel title -- markdown | File name without path, e.g. "README.md" (dynamic, updates on file change) |
 | Panel title -- markdown (no file) | "Markdown" (default before a file is opened) |
-| Sidebar section header | "FILES" (all caps, 11px semibold) |
-| Sidebar "New Canvas" button | "New Canvas" (13px, accent-colored text, no button chrome) |
+| Sidebar section header | "FILES" (all caps, 12px semibold) |
+| Sidebar "New Canvas" button | "New Canvas" (14px, accent-colored text, no button chrome) |
 | Sidebar folder indicator | Prefix with unicode triangle: "\u{25B6} " (collapsed) / "\u{25BC} " (expanded) |
 
 No destructive actions exist in Phase 3. Canvas auto-saves (D-02). Markdown is read-only (D-05). Panel close uses existing Phase 1 mechanism with no confirmation.
@@ -275,7 +288,7 @@ Phase 3 introduces the following renderable elements. Each maps to existing or n
 
 ```
 +----------------------------------------------------------+
-|  Title Bar (38px, full width)                             |
+|  Title Bar (inherited Phase 1, full width)                |
 +--------+-------------------------------------------------+
 | Side-  |                                                  |
 | bar    |  Grid Area (remaining width x remaining height)  |
@@ -292,22 +305,22 @@ Phase 3 introduces the following renderable elements. Each maps to existing or n
 
 - Sidebar: Fixed 240px width, left edge, outside taffy grid. Background uses panel_background color.
 - Grid: Fills `window_width - sidebar_width` (or full width when sidebar hidden) x `window_height - TITLE_BAR_HEIGHT`.
-- Panel title bar: 28px height within each panel, contains type label and close/fullscreen buttons.
-- Content area: Panel height minus 28px title bar.
+- Panel title bar: Inherited Phase 1 height within each panel, contains type label and close/fullscreen buttons.
+- Content area: Panel height minus title bar height.
 
 ### Markdown Viewer Internal Layout
 
 ```
 +----------------------------------+
-| Panel Title Bar (28px)           |
+| Panel Title Bar (inherited)      |
 +----------------------------------+
 | md:16px padding                  |
 |                                  |
 |  H1 (28px semibold, 32px top)   |
 |  md:16px gap                     |
-|  Body paragraph (15px, 24px lh)  |
+|  Body paragraph (14px, 21px lh)  |
 |  md:16px gap                     |
-|  H2 (22px semibold, 24px top)   |
+|  H2 (20px semibold, 24px top)   |
 |  md:16px gap                     |
 |  Body paragraph                  |
 |  md:16px gap                     |
@@ -345,15 +358,15 @@ Maximum content width: None (fills panel width minus 32px total horizontal paddi
 ```
 +------------------------------+
 | md:16px top padding          |
-| "FILES" heading (11px semi)  |
+| "FILES" heading (12px semi)  |
 | sm:8px gap                   |
-| > folder_name/ (13px)       |  <- 0px indent
-|   file.rs (13px)            |  <- 16px indent (1 level)
-|   subfolder/ (13px)         |  <- 16px indent
-|     deep.rs (13px)          |  <- 32px indent (2 levels)
-| file_at_root.md (13px)      |  <- 0px indent
+| > folder_name/ (14px)       |  <- 0px indent
+|   file.rs (14px)            |  <- 16px indent (1 level)
+|   subfolder/ (14px)         |  <- 16px indent
+|     deep.rs (14px)          |  <- 32px indent (2 levels)
+| file_at_root.md (14px)      |  <- 0px indent
 | sm:8px gap                   |
-| "New Canvas" button (13px)   |
+| "New Canvas" button (14px)   |
 +------------------------------+
 ```
 

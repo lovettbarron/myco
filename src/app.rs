@@ -32,10 +32,10 @@ use crate::terminal::TerminalManager;
 use crate::theme::Theme;
 use crate::window::create_window;
 
-/// Height of the custom title bar area in pixels.
+/// Height of the app title bar in logical points.
 const TITLE_BAR_HEIGHT: f32 = 38.0;
 
-/// Height of the panel title bar area in pixels.
+/// Height of the panel title bar area in logical points.
 const PANEL_TITLE_HEIGHT: f32 = 28.0;
 
 /// Accumulates per-frame performance metrics (frame stats) for periodic logging.
@@ -49,6 +49,7 @@ struct FrameStats {
     frame_time_max: Duration,
     quad_count_sum: u64,
     cell_count_sum: u64,
+    last_log: Instant,
 }
 
 impl FrameStats {
@@ -59,6 +60,7 @@ impl FrameStats {
             frame_time_max: Duration::ZERO,
             quad_count_sum: 0,
             cell_count_sum: 0,
+            last_log: Instant::now(),
         }
     }
 
@@ -70,17 +72,22 @@ impl FrameStats {
         self.cell_count_sum += cell_count as u64;
     }
 
+    fn should_log(&self) -> bool {
+        self.frame_count >= 60 || self.last_log.elapsed() >= Duration::from_secs(5)
+    }
+
     fn log_and_reset(&mut self) {
         if self.frame_count == 0 {
             return;
         }
         let avg = self.frame_time_sum / self.frame_count as u32;
         debug!(
+            frames = self.frame_count,
             avg_ms = format!("{:.2}", avg.as_secs_f64() * 1000.0),
             max_ms = format!("{:.2}", self.frame_time_max.as_secs_f64() * 1000.0),
             avg_quads = self.quad_count_sum / self.frame_count,
             avg_cells = self.cell_count_sum / self.frame_count,
-            "frame stats (60 frames)"
+            "frame stats"
         );
         *self = Self::new();
     }
@@ -110,6 +117,8 @@ pub struct App {
     redraw_pending: bool,
     /// Per-frame performance stats, logged every 60 frames at debug level.
     frame_stats: FrameStats,
+    /// Display scale factor (2.0 on Retina, 1.0 on standard displays).
+    scale_factor: f32,
 }
 
 impl App {
@@ -131,6 +140,7 @@ impl App {
             proxy: Some(proxy),
             redraw_pending: false,
             frame_stats: FrameStats::new(),
+            scale_factor: 1.0,
         }
     }
 }
@@ -156,9 +166,12 @@ impl App {
                 ) {
                     let window = self.window.as_ref();
                     let total_size = match (orientation, window) {
-                        (Orientation::Vertical, Some(w)) => w.inner_size().width as f32,
+                        (Orientation::Vertical, Some(w)) => {
+                            w.inner_size().width as f32 / self.scale_factor
+                        }
                         (Orientation::Horizontal, Some(w)) => {
-                            w.inner_size().height as f32 - TITLE_BAR_HEIGHT
+                            w.inner_size().height as f32 / self.scale_factor
+                                - TITLE_BAR_HEIGHT
                         }
                         _ => return,
                     };
@@ -586,10 +599,11 @@ impl App {
         if let (Some(grid), Some(window)) = (self.grid.as_mut(), self.window.as_ref()) {
             let size = window.inner_size();
             if size.width > 0 && size.height > 0 {
-                let grid_height = size.height as f32 - TITLE_BAR_HEIGHT;
-                grid.compute(size.width as f32, grid_height.max(1.0));
-                self.dividers =
-                    compute_dividers(grid, size.width as f32, grid_height.max(1.0));
+                let w = size.width as f32 / self.scale_factor;
+                let h = size.height as f32 / self.scale_factor;
+                let grid_height = h - TITLE_BAR_HEIGHT;
+                grid.compute(w, grid_height.max(1.0));
+                self.dividers = compute_dividers(grid, w, grid_height.max(1.0));
             }
         }
     }
@@ -631,7 +645,6 @@ impl App {
             None => return quads,
         };
 
-        // Title bar background quad (full width, TITLE_BAR_HEIGHT tall)
         quads.push(QuadInstance {
             position: [0.0, 0.0],
             size: [width, TITLE_BAR_HEIGHT],
@@ -1004,12 +1017,7 @@ impl App {
 }
 
 impl ApplicationHandler<UserEvent> for App {
-    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
-        if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
-        }
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: UserEvent) {
@@ -1027,6 +1035,7 @@ impl ApplicationHandler<UserEvent> for App {
         info!("Application resumed -- creating window and GPU state");
 
         let window = create_window(event_loop);
+        self.scale_factor = window.scale_factor() as f32;
 
         // Set up custom title bar with traffic lights (D-14)
         #[cfg(target_os = "macos")]
@@ -1062,10 +1071,11 @@ impl ApplicationHandler<UserEvent> for App {
         let mut grid = GridLayout::new_single_panel();
         let size = window.inner_size();
         if size.width > 0 && size.height > 0 {
-            let grid_height = size.height as f32 - TITLE_BAR_HEIGHT;
-            grid.compute(size.width as f32, grid_height.max(1.0));
-            self.dividers =
-                compute_dividers(&grid, size.width as f32, grid_height.max(1.0));
+            let w = size.width as f32 / self.scale_factor;
+            let h = size.height as f32 / self.scale_factor;
+            let grid_height = h - TITLE_BAR_HEIGHT;
+            grid.compute(w, grid_height.max(1.0));
+            self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
         }
 
         // Create the initial terminal panel (not placeholder)
@@ -1129,10 +1139,12 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::CursorMoved { position, .. } => {
+                let lx = position.x / self.scale_factor as f64;
+                let ly = position.y / self.scale_factor as f64;
                 if let Some(grid) = &self.grid {
                     let actions = self.mouse_state.on_cursor_moved(
-                        position.x,
-                        position.y,
+                        lx,
+                        ly,
                         &self.dividers,
                         grid,
                         TITLE_BAR_HEIGHT,
@@ -1248,12 +1260,13 @@ impl ApplicationHandler<UserEvent> for App {
                     let _frame_span = tracing::trace_span!("frame").entered();
                     let frame_start = Instant::now();
                     let size = window.inner_size();
-                    let vw = size.width as f32;
-                    let vh = size.height as f32;
+                    let s = self.scale_factor;
+                    let logical_w = size.width as f32 / s;
+                    let logical_h = size.height as f32 / s;
+                    let physical_w = size.width as f32;
+                    let physical_h = size.height as f32;
 
                     // Pre-compute terminal snapshots once per frame (WR-01: avoid double snapshot).
-                    // Each snapshot acquires the FairMutex briefly. Reusing it for both
-                    // quad building and text preparation ensures visual consistency.
                     let _snap_span = tracing::trace_span!("snapshot_terminals").entered();
                     let mut snapshots: HashMap<PanelId, TerminalSnapshot> = HashMap::new();
                     if let Some(tm) = &self.terminal_manager {
@@ -1270,13 +1283,37 @@ impl ApplicationHandler<UserEvent> for App {
                     drop(_snap_span);
                     let cell_count: usize = snapshots.values().map(|s| s.cols * s.rows.len()).sum();
 
-                    // Build frame data
-                    let quads = self.build_quads(vw, vh, &snapshots);
-                    let labels = self.build_labels(vw, vh);
+                    // Build frame data in logical coordinates
+                    let logical_quads = self.build_quads(logical_w, logical_h, &snapshots);
+                    let logical_labels = self.build_labels(logical_w, logical_h);
+
+                    // Scale quads from logical to physical at the GPU render boundary
+                    let quads: Vec<QuadInstance> = logical_quads
+                        .into_iter()
+                        .map(|mut q| {
+                            q.position[0] *= s;
+                            q.position[1] *= s;
+                            q.size[0] *= s;
+                            q.size[1] *= s;
+                            q.corner_radius *= s;
+                            q
+                        })
+                        .collect();
+
+                    // Scale label positions/sizes to physical (font_size stays logical;
+                    // glyphon's TextArea.scale handles DPI scaling for text)
+                    let labels: Vec<TextLabel> = logical_labels
+                        .into_iter()
+                        .map(|mut l| {
+                            l.x *= s;
+                            l.y *= s;
+                            l.width *= s;
+                            l.height *= s;
+                            l
+                        })
+                        .collect();
 
                     // Prepare terminal text (buffer building from pre-computed snapshots)
-                    // This must happen before renderer.render() since it sets
-                    // terminal buffers on the text engine.
                     if let Some(renderer) = &mut self.renderer {
                         let mut terminal_buffers = Vec::new();
                         let mut terminal_metas = Vec::new();
@@ -1296,6 +1333,7 @@ impl ApplicationHandler<UserEvent> for App {
                                                     py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
                                                 let content_h = ph - PANEL_TITLE_HEIGHT;
 
+                                                // prepare_buffers works in logical coords
                                                 let (bufs, metas) = self
                                                     .terminal_renderer
                                                     .prepare_buffers(
@@ -1310,7 +1348,22 @@ impl ApplicationHandler<UserEvent> for App {
                                                         ts.cell_height,
                                                     );
                                                 terminal_buffers.extend(bufs);
-                                                terminal_metas.extend(metas);
+                                                // Scale terminal text metas to physical
+                                                terminal_metas.extend(metas.into_iter().map(
+                                                    |mut m| {
+                                                        m.left *= s;
+                                                        m.top *= s;
+                                                        m.bounds_left =
+                                                            (m.bounds_left as f32 * s) as i32;
+                                                        m.bounds_top =
+                                                            (m.bounds_top as f32 * s) as i32;
+                                                        m.bounds_right =
+                                                            (m.bounds_right as f32 * s) as i32;
+                                                        m.bounds_bottom =
+                                                            (m.bounds_bottom as f32 * s) as i32;
+                                                        m
+                                                    },
+                                                ));
                                             }
                                         }
                                     }
@@ -1323,14 +1376,13 @@ impl ApplicationHandler<UserEvent> for App {
                             .text_engine_mut()
                             .set_terminal_buffers(terminal_buffers, terminal_metas);
 
-                        let scale_factor = window.scale_factor() as f32;
                         match renderer.render(
                             self.theme.background,
                             &quads,
                             &labels,
-                            vw,
-                            vh,
-                            scale_factor,
+                            physical_w,
+                            physical_h,
+                            s,
                         ) {
                             crate::renderer::RenderResult::Ok => {}
                             crate::renderer::RenderResult::SkipFrame => {}
@@ -1343,7 +1395,7 @@ impl ApplicationHandler<UserEvent> for App {
                     }
 
                     self.frame_stats.record(frame_start.elapsed(), quads.len(), cell_count);
-                    if self.frame_stats.frame_count >= 60 {
+                    if self.frame_stats.should_log() {
                         self.frame_stats.log_and_reset();
                     }
                 }
@@ -1357,24 +1409,29 @@ impl ApplicationHandler<UserEvent> for App {
         const ACTIVE_INTERVAL: Duration = Duration::from_millis(16);
         const IDLE_INTERVAL: Duration = Duration::from_millis(500);
 
-        let mut dirty = false;
+        let mut needs_render = false;
         if let Some(tm) = &mut self.terminal_manager {
             if tm.drain_all_events() {
-                dirty = true;
+                needs_render = true;
             }
             if tm.update_all_cursor_blinks() {
-                dirty = true;
+                needs_render = true;
             }
             for ts in tm.terminals_mut().values_mut() {
                 ts.clear_expired_flash();
             }
         }
 
-        // Poll frequently when terminal has activity, slowly when idle (cursor blink only).
+        if needs_render {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+
         let has_terminals = self.terminal_manager.as_ref()
             .map_or(false, |tm| !tm.terminals().is_empty());
         if has_terminals {
-            let interval = if dirty { ACTIVE_INTERVAL } else { IDLE_INTERVAL };
+            let interval = if needs_render { ACTIVE_INTERVAL } else { IDLE_INTERVAL };
             event_loop.set_control_flow(
                 winit::event_loop::ControlFlow::WaitUntil(Instant::now() + interval)
             );
