@@ -4,6 +4,8 @@
 //! build glyphon Buffers from the snapshot without holding the lock.
 //! This avoids blocking the PTY event loop during GPU text shaping.
 
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use alacritty_terminal::grid::Dimensions;
@@ -13,12 +15,12 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Color, CursorShape};
 use glyphon::cosmic_text::{self, Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
-use glyphon::Color as GlyphonColor;
+use glyphon::{Color as GlyphonColor, TextArea, TextBounds};
 
 use super::colors::{resolve_bg, resolve_fg, AnsiPalette};
 use super::event_listener::MycoEventListener;
+use crate::grid::panel::PanelId;
 use crate::renderer::quad_renderer::QuadInstance;
-use crate::renderer::text_renderer::TerminalTextAreaMeta;
 
 /// Snapshot of the terminal grid state, copied while the lock is held.
 ///
@@ -39,6 +41,35 @@ pub struct SnapshotCell {
     pub flags: Flags,
 }
 
+/// Per-panel cache of shaped glyphon Buffers keyed by row content hash.
+///
+/// Only Buffers are cached (expensive shaping). Positional metadata is
+/// recomputed each frame since it's just arithmetic.
+struct PanelBufferCache {
+    row_hashes: Vec<u64>,
+    row_buffers: Vec<Option<Buffer>>,
+    // Size params that trigger full invalidation on change
+    viewport_w: f32,
+    viewport_h: f32,
+    font_size: f32,
+    cell_width: f32,
+    cell_height: f32,
+    // Position params for meta computation (updated each frame, no invalidation)
+    viewport_x: f32,
+    viewport_y: f32,
+}
+
+fn hash_row(cells: &[SnapshotCell], palette: &AnsiPalette) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for cell in cells {
+        (cell.c as u32).hash(&mut hasher);
+        let rgb = resolve_fg(cell.fg, palette);
+        rgb.hash(&mut hasher);
+        cell.flags.bits().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 /// GPU character grid renderer for terminal panels.
 ///
 /// Produces QuadInstance data (backgrounds, cursor) and glyphon Buffer/TextArea
@@ -52,6 +83,8 @@ pub struct TerminalRenderer {
     pub cell_width: f32,
     /// Cell height computed from font metrics.
     pub cell_height: f32,
+    /// Per-panel buffer cache: shaped Buffers keyed by row content hash.
+    buffer_cache: HashMap<PanelId, PanelBufferCache>,
 }
 
 impl TerminalRenderer {
@@ -62,6 +95,7 @@ impl TerminalRenderer {
             font_size: 14.0,
             cell_width: 14.0 * 0.6,
             cell_height: 14.0 * 1.3,
+            buffer_cache: HashMap::new(),
         }
     }
 
@@ -140,13 +174,58 @@ impl TerminalRenderer {
         }
     }
 
-    /// Build per-row glyphon Buffers from a terminal snapshot.
+    /// Build rich text spans for a single row, grouped by foreground color.
     ///
-    /// This is the second step of the snapshot + prepare_buffers two-step API.
-    /// No lock is held during this operation.
+    /// Skips WIDE_CHAR_SPACER cells (per Pitfall 3).
+    fn build_row_spans(palette: &AnsiPalette, cells: &[SnapshotCell]) -> Vec<(String, Attrs<'static>)> {
+        let mut spans: Vec<(String, Attrs<'static>)> = Vec::new();
+        let mut current_text = String::new();
+        let mut current_fg: Option<[u8; 3]> = None;
+
+        for cell in cells {
+            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                continue;
+            }
+
+            let rgb = resolve_fg(cell.fg, palette);
+            let same_attrs = current_fg == Some(rgb);
+
+            if !same_attrs && !current_text.is_empty() {
+                let [r, g, b] = current_fg.unwrap();
+                spans.push((
+                    std::mem::take(&mut current_text),
+                    Attrs::new()
+                        .family(Family::Monospace)
+                        .color(cosmic_text::Color::rgb(r, g, b)),
+                ));
+            }
+
+            current_fg = Some(rgb);
+            current_text.push(cell.c);
+        }
+
+        if !current_text.is_empty() {
+            if let Some([r, g, b]) = current_fg {
+                spans.push((
+                    current_text,
+                    Attrs::new()
+                        .family(Family::Monospace)
+                        .color(cosmic_text::Color::rgb(r, g, b)),
+                ));
+            }
+        }
+
+        spans
+    }
+
+    /// Update the per-panel buffer cache using row-content hashing.
+    ///
+    /// Only reshapes rows whose content hash changed since the last call.
+    /// On viewport/font parameter changes, the entire cache is invalidated.
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn prepare_buffers(
-        &self,
+    pub fn update_cache(
+        &mut self,
+        panel_id: PanelId,
         font_system: &mut FontSystem,
         snapshot: &TerminalSnapshot,
         viewport_x: f32,
@@ -156,27 +235,79 @@ impl TerminalRenderer {
         font_size: f32,
         cell_width: f32,
         cell_height: f32,
-    ) -> (Vec<Buffer>, Vec<TerminalTextAreaMeta>) {
-        let mut buffers = Vec::new();
-        let mut metas = Vec::new();
+    ) {
+        let cache = self.buffer_cache.entry(panel_id).or_insert_with(|| PanelBufferCache {
+            row_hashes: Vec::new(),
+            row_buffers: Vec::new(),
+            viewport_w: 0.0,
+            viewport_h: 0.0,
+            font_size: 0.0,
+            cell_width: 0.0,
+            cell_height: 0.0,
+            viewport_x: 0.0,
+            viewport_y: 0.0,
+        });
+
+        // Always update position (cheap, no invalidation)
+        cache.viewport_x = viewport_x;
+        cache.viewport_y = viewport_y;
+
+        let params_changed = (cache.viewport_w - viewport_w).abs() > 0.01
+            || (cache.viewport_h - viewport_h).abs() > 0.01
+            || (cache.font_size - font_size).abs() > 0.01
+            || (cache.cell_width - cell_width).abs() > 0.01
+            || (cache.cell_height - cell_height).abs() > 0.01;
+
+        if params_changed {
+            cache.row_buffers.clear();
+            cache.row_hashes.clear();
+            cache.viewport_w = viewport_w;
+            cache.viewport_h = viewport_h;
+            cache.font_size = font_size;
+            cache.cell_width = cell_width;
+            cache.cell_height = cell_height;
+        }
 
         let metrics = Metrics::new(font_size, cell_height);
+        let num_rows = snapshot.rows.len();
+
+        let mut new_hashes: Vec<u64> = Vec::with_capacity(num_rows);
+        let mut new_buffers: Vec<Option<Buffer>> = Vec::with_capacity(num_rows);
 
         for (row_idx, row_cells) in snapshot.rows.iter().enumerate() {
             if row_cells.is_empty() {
+                new_hashes.push(0);
+                new_buffers.push(None);
                 continue;
             }
 
             let top = viewport_y + (row_idx as f32) * cell_height;
-
-            // Skip rows that are outside the visible viewport
             if top + cell_height < viewport_y || top > viewport_y + viewport_h {
+                new_hashes.push(0);
+                new_buffers.push(None);
                 continue;
             }
 
-            // Build rich text spans grouped by foreground color
-            let spans = self.build_row_spans(row_cells);
+            let hash = hash_row(row_cells, &self.palette);
+            new_hashes.push(hash);
+
+            if !params_changed
+                && row_idx < cache.row_hashes.len()
+                && cache.row_hashes[row_idx] == hash
+            {
+                let buf = if row_idx < cache.row_buffers.len() {
+                    cache.row_buffers[row_idx].take()
+                } else {
+                    None
+                };
+                new_buffers.push(buf);
+                continue;
+            }
+
+            // Row changed — reshape
+            let spans = Self::build_row_spans(&self.palette, row_cells);
             if spans.is_empty() {
+                new_buffers.push(None);
                 continue;
             }
 
@@ -196,71 +327,56 @@ impl TerminalRenderer {
             );
             buffer.shape_until_scroll(font_system, false);
 
-            let left = viewport_x;
-
-            metas.push(TerminalTextAreaMeta {
-                left,
-                top,
-                bounds_left: viewport_x as i32,
-                bounds_top: viewport_y as i32,
-                bounds_right: (viewport_x + viewport_w) as i32,
-                bounds_bottom: (viewport_y + viewport_h) as i32,
-                default_color: GlyphonColor::rgb(
-                    self.palette.foreground[0],
-                    self.palette.foreground[1],
-                    self.palette.foreground[2],
-                ),
-            });
-            buffers.push(buffer);
+            new_buffers.push(Some(buffer));
         }
 
-        (buffers, metas)
+        cache.row_hashes = new_hashes;
+        cache.row_buffers = new_buffers;
     }
 
-    /// Build rich text spans for a single row, grouped by foreground color.
+    /// Collect TextArea references from all cached panel buffers.
     ///
-    /// Skips WIDE_CHAR_SPACER cells (per Pitfall 3).
-    fn build_row_spans(&self, cells: &[SnapshotCell]) -> Vec<(String, Attrs<'static>)> {
-        let mut spans: Vec<(String, Attrs<'static>)> = Vec::new();
-        let mut current_text = String::new();
-        let mut current_fg: Option<[u8; 3]> = None;
+    /// Computes positional metadata from cache params, scaled to physical coordinates.
+    pub fn collect_text_areas(&self, scale: f32) -> Vec<TextArea<'_>> {
+        let mut areas = Vec::new();
+        for cache in self.buffer_cache.values() {
+            let vx = cache.viewport_x;
+            let vy = cache.viewport_y;
+            let vw = cache.viewport_w;
+            let vh = cache.viewport_h;
+            let ch = cache.cell_height;
+            let default_color = GlyphonColor::rgb(
+                self.palette.foreground[0],
+                self.palette.foreground[1],
+                self.palette.foreground[2],
+            );
 
-        for cell in cells {
-            // Skip spacer cells for wide characters (per Pitfall 3)
-            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                continue;
-            }
-
-            let rgb = resolve_fg(cell.fg, &self.palette);
-            let same_attrs = current_fg == Some(rgb);
-
-            if !same_attrs && !current_text.is_empty() {
-                let [r, g, b] = current_fg.unwrap();
-                spans.push((
-                    std::mem::take(&mut current_text),
-                    Attrs::new()
-                        .family(Family::Monospace)
-                        .color(cosmic_text::Color::rgb(r, g, b)),
-                ));
-            }
-
-            current_fg = Some(rgb);
-            current_text.push(cell.c);
-        }
-
-        // Push final span
-        if !current_text.is_empty() {
-            if let Some([r, g, b]) = current_fg {
-                spans.push((
-                    current_text,
-                    Attrs::new()
-                        .family(Family::Monospace)
-                        .color(cosmic_text::Color::rgb(r, g, b)),
-                ));
+            for (row_idx, buf_opt) in cache.row_buffers.iter().enumerate() {
+                if let Some(buf) = buf_opt {
+                    let top = vy + (row_idx as f32) * ch;
+                    areas.push(TextArea {
+                        buffer: buf,
+                        left: vx * scale,
+                        top: top * scale,
+                        scale,
+                        bounds: TextBounds {
+                            left: (vx * scale) as i32,
+                            top: (vy * scale) as i32,
+                            right: ((vx + vw) * scale) as i32,
+                            bottom: ((vy + vh) * scale) as i32,
+                        },
+                        default_color,
+                        custom_glyphs: &[],
+                    });
+                }
             }
         }
+        areas
+    }
 
-        spans
+    /// Remove cached buffers for a panel (call on panel close).
+    pub fn invalidate_panel_cache(&mut self, panel_id: &PanelId) {
+        self.buffer_cache.remove(panel_id);
     }
 
     /// Build quad instances for terminal backgrounds and cursor.

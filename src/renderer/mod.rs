@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tracing::warn;
 use winit::window::Window;
 
+use glyphon::TextArea;
 use gpu_state::GpuState;
 use quad_renderer::{QuadInstance, QuadRenderer};
 use text_renderer::{TextEngine, TextLabel};
@@ -66,6 +67,7 @@ impl Renderer {
         viewport_width: f32,
         viewport_height: f32,
         scale_factor: f32,
+        terminal_text_areas: Vec<TextArea<'_>>,
     ) -> RenderResult {
         // Prepare quad data
         self.quad_renderer.prepare(
@@ -84,6 +86,7 @@ impl Renderer {
             viewport_width as u32,
             viewport_height as u32,
             scale_factor,
+            terminal_text_areas,
         );
 
         let surface_texture = self.gpu_state.surface().get_current_texture();

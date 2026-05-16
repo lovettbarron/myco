@@ -43,10 +43,6 @@ pub struct TextEngine {
     /// Buffers must outlive the TextArea references during prepare/render.
     /// Cleared and rebuilt each frame.
     buffers: Vec<Buffer>,
-    /// Pre-built terminal row buffers for per-cell true-color rendering (TERM-02).
-    terminal_buffers: Vec<Buffer>,
-    /// Metadata for each terminal text area.
-    terminal_areas_meta: Vec<TerminalTextAreaMeta>,
 }
 
 impl TextEngine {
@@ -72,8 +68,6 @@ impl TextEngine {
             text_renderer,
             viewport,
             buffers: Vec::new(),
-            terminal_buffers: Vec::new(),
-            terminal_areas_meta: Vec::new(),
         }
     }
 
@@ -87,23 +81,10 @@ impl TextEngine {
         self.font_system.db_mut().load_font_data(data);
     }
 
-    /// Set pre-built terminal row buffers for inclusion in the next prepare() call.
-    ///
-    /// This enables per-cell true-color rendering (TERM-02) via rich text Buffers.
-    pub fn set_terminal_buffers(
-        &mut self,
-        buffers: Vec<Buffer>,
-        areas_meta: Vec<TerminalTextAreaMeta>,
-    ) {
-        self.terminal_buffers = buffers;
-        self.terminal_areas_meta = areas_meta;
-    }
-
-    /// Prepare text labels for rendering.
+    /// Prepare text labels and terminal text for rendering.
     ///
     /// Creates glyphon Buffers for each label, shapes text, and uploads to the GPU atlas.
-    /// The buffers are stored on self to keep them alive for the render pass.
-    /// Also includes any pre-built terminal buffers set via set_terminal_buffers().
+    /// Terminal text areas are passed in pre-built from TerminalRenderer's cache.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -112,6 +93,7 @@ impl TextEngine {
         width: u32,
         height: u32,
         scale_factor: f32,
+        terminal_text_areas: Vec<TextArea<'_>>,
     ) {
         self.viewport
             .update(queue, Resolution { width, height });
@@ -137,7 +119,7 @@ impl TextEngine {
             self.buffers.push(buffer);
         }
 
-        // Build TextAreas referencing the stored buffers
+        // Build TextAreas referencing the stored label buffers
         let mut text_areas: Vec<TextArea> = self
             .buffers
             .iter()
@@ -158,27 +140,8 @@ impl TextEngine {
             })
             .collect();
 
-        // Add terminal text areas from pre-built buffers
-        for (buf, meta) in self
-            .terminal_buffers
-            .iter()
-            .zip(self.terminal_areas_meta.iter())
-        {
-            text_areas.push(TextArea {
-                buffer: buf,
-                left: meta.left,
-                top: meta.top,
-                scale: scale_factor,
-                bounds: TextBounds {
-                    left: meta.bounds_left,
-                    top: meta.bounds_top,
-                    right: meta.bounds_right,
-                    bottom: meta.bounds_bottom,
-                },
-                default_color: meta.default_color,
-                custom_glyphs: &[],
-            });
-        }
+        // Append terminal text areas from TerminalRenderer's persistent cache
+        text_areas.extend(terminal_text_areas);
 
         if let Err(e) = self.text_renderer.prepare(
             device,

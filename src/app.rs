@@ -218,6 +218,7 @@ impl App {
                 if let Some(tm) = &mut self.terminal_manager {
                     tm.destroy_terminal(&panel_id);
                 }
+                self.terminal_renderer.invalidate_panel_cache(&panel_id);
                 if let Some(grid) = self.grid.as_mut() {
                     if operations::close_panel(grid, panel_id) {
                         self.panels.retain(|p| p.id != panel_id);
@@ -1313,11 +1314,8 @@ impl ApplicationHandler<UserEvent> for App {
                         })
                         .collect();
 
-                    // Prepare terminal text (buffer building from pre-computed snapshots)
+                    // Phase 1: Update terminal buffer caches (only reshapes changed rows)
                     if let Some(renderer) = &mut self.renderer {
-                        let mut terminal_buffers = Vec::new();
-                        let mut terminal_metas = Vec::new();
-
                         if let Some(tm) = &self.terminal_manager {
                             if let Some(grid) = &self.grid {
                                 let font_system =
@@ -1333,37 +1331,18 @@ impl ApplicationHandler<UserEvent> for App {
                                                     py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
                                                 let content_h = ph - PANEL_TITLE_HEIGHT;
 
-                                                // prepare_buffers works in logical coords
-                                                let (bufs, metas) = self
-                                                    .terminal_renderer
-                                                    .prepare_buffers(
-                                                        font_system,
-                                                        snapshot,
-                                                        px,
-                                                        content_y,
-                                                        pw,
-                                                        content_h,
-                                                        ts.font_size,
-                                                        ts.cell_width,
-                                                        ts.cell_height,
-                                                    );
-                                                terminal_buffers.extend(bufs);
-                                                // Scale terminal text metas to physical
-                                                terminal_metas.extend(metas.into_iter().map(
-                                                    |mut m| {
-                                                        m.left *= s;
-                                                        m.top *= s;
-                                                        m.bounds_left =
-                                                            (m.bounds_left as f32 * s) as i32;
-                                                        m.bounds_top =
-                                                            (m.bounds_top as f32 * s) as i32;
-                                                        m.bounds_right =
-                                                            (m.bounds_right as f32 * s) as i32;
-                                                        m.bounds_bottom =
-                                                            (m.bounds_bottom as f32 * s) as i32;
-                                                        m
-                                                    },
-                                                ));
+                                                self.terminal_renderer.update_cache(
+                                                    panel_id,
+                                                    font_system,
+                                                    snapshot,
+                                                    px,
+                                                    content_y,
+                                                    pw,
+                                                    content_h,
+                                                    ts.font_size,
+                                                    ts.cell_width,
+                                                    ts.cell_height,
+                                                );
                                             }
                                         }
                                     }
@@ -1371,11 +1350,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 drop(_prep_span);
                             }
                         }
+                    }
 
-                        renderer
-                            .text_engine_mut()
-                            .set_terminal_buffers(terminal_buffers, terminal_metas);
+                    // Phase 2: Collect cached TextAreas and render
+                    let terminal_text_areas = self.terminal_renderer.collect_text_areas(s);
 
+                    if let Some(renderer) = &mut self.renderer {
                         match renderer.render(
                             self.theme.background,
                             &quads,
@@ -1383,6 +1363,7 @@ impl ApplicationHandler<UserEvent> for App {
                             physical_w,
                             physical_h,
                             s,
+                            terminal_text_areas,
                         ) {
                             crate::renderer::RenderResult::Ok => {}
                             crate::renderer::RenderResult::SkipFrame => {}
