@@ -663,28 +663,23 @@ fn handle_panel_resize(
 | A4 | JetBrains Mono Regular .ttf is ~300KB and suitable for include_bytes!() bundling | Standard Stack | If significantly larger, could increase binary size. Low risk -- font files are typically small. |
 | A5 | copypasta 0.10.2 works with the objc2 version already in Cargo.toml (0.6.4) | Standard Stack | Potential version conflict if copypasta pins a different objc2. Mitigation: check dependency resolution. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **tty::Options working directory field**
+1. **tty::Options working directory field** (RESOLVED)
    - What we know: alacritty_terminal's tty module creates PTYs. The Options struct configures the shell.
-   - What's unclear: Whether Options has a `working_directory` or `cwd` field for D-02 (start in project folder).
-   - Recommendation: Check at implementation time. If not available, use `std::env::set_current_dir()` before PTY creation or pass `--cd` to the shell.
+   - Resolution: tty::Options has a `working_directory` field that accepts an `Option<PathBuf>`. Confirmed by Task 1 implementation. Pass the project folder path directly.
 
-2. **cosmic-text Buffer performance for terminal grids**
+2. **cosmic-text Buffer performance for terminal grids** (RESOLVED)
    - What we know: set_rich_text works per-row with attribute spans. Typical terminal is 80x24 to 200x50 cells.
-   - What's unclear: Whether creating ~50 Buffers per frame (one per row) and calling set_rich_text on each is fast enough for 60fps.
-   - Recommendation: Start with naive per-row approach. If too slow, implement damage tracking (only rebuild rows that changed) and Buffer caching.
+   - Resolution: Per-row approach accepted as the implementation path. Damage tracking is a future optimization if profiling reveals issues. Initial implementation rebuilds all visible rows per frame -- acceptable for 60fps at typical terminal sizes (50 rows x ~80 cols).
 
-3. **parking_lot::FairMutex dependency**
+3. **parking_lot::FairMutex dependency** (RESOLVED)
    - What we know: alacritty_terminal uses `parking_lot::FairMutex` for Term synchronization (seen in EventLoop::new signature).
-   - What's unclear: Whether parking_lot is already a transitive dependency or needs explicit addition.
-   - Recommendation: It should come transitively via alacritty_terminal. Verify at cargo add time.
+   - Resolution: parking_lot is added explicitly in Cargo.toml (`parking_lot = "0.12"`) to ensure the correct version is available regardless of transitive dependency resolution.
 
-4. **Event::CursorBlinkingChange handling**
+4. **Event::CursorBlinkingChange handling** (RESOLVED)
    - What we know: alacritty_terminal sends CursorBlinkingChange events when programs toggle blink.
-   - What's unclear: Whether the event carries the new state (blinking on/off) or just signals a change.
-   - Recommendation: Check TermMode flags after receiving the event to determine current blink state.
-
+   - Resolution: Check TermMode flags after receiving the CursorBlinkingChange event to determine current blink state. The event signals a change occurred; the authoritative state is in TermMode flags (TermMode::CURSOR_BLINKING).
 ## Environment Availability
 
 | Dependency | Required By | Available | Version | Fallback |
