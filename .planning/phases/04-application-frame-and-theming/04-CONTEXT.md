@@ -32,8 +32,9 @@ This phase wraps the existing workspace (grid + sidebar + custom title bar) in f
 ### Theme System
 - **D-11:** Themes use a layered definition: ~8-10 base colors that auto-derive the full palette, with optional per-field overrides for power users. Simple themes are easy to create; full control is available.
 - **D-12:** Each theme includes a 16-color ANSI terminal palette. Switching themes changes both UI and terminal colors together for a consistent aesthetic.
-- **D-13:** Default themes are classic faithful: Solarized uses exact Ethan Schoonover colors (both light and dark variants). Obsidian minimalist is true dark gray/charcoal with low-saturation accents inspired by Obsidian's default dark theme.
-- **D-14:** Custom themes are JSON files in ~/.myco/themes/. App scans this directory on startup. Theme names derived from filenames. Share themes by copying files.
+- **D-13:** Three built-in themes: Dracula (currently implemented in src/theme.rs — remains the default), Solarized (exact Ethan Schoonover colors, both light and dark variants), and Obsidian minimalist (true dark gray/charcoal with low-saturation accents inspired by Obsidian's default dark theme).
+- **D-14:** Dracula is the default theme on fresh install. The existing color values in Theme::dark() are preserved as the Dracula theme definition.
+- **D-15:** Custom themes are JSON files in ~/.myco/themes/. App scans this directory on startup. Theme names derived from filenames. Share themes by copying files.
 
 </decisions>
 
