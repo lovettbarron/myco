@@ -29,6 +29,7 @@ use crate::input::{CursorStyle, InputAction};
 use crate::renderer::quad_renderer::QuadInstance;
 use crate::renderer::text_renderer::TextLabel;
 use crate::renderer::Renderer;
+use crate::canvas::CanvasManager;
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
 use crate::theme::Theme;
@@ -111,6 +112,8 @@ pub struct App {
     modifiers: ModifiersState,
     /// Manages all terminal instances (PTY lifecycle, event draining).
     terminal_manager: Option<TerminalManager>,
+    /// Manages all canvas (TLDraw webview) instances.
+    canvas_manager: Option<CanvasManager>,
     /// GPU terminal renderer (snapshot + buffer building, quad generation).
     terminal_renderer: TerminalRenderer,
     /// Proxy for waking the event loop from background threads.
@@ -138,6 +141,7 @@ impl App {
             focused_panel: Some(PanelId(0)),
             modifiers: ModifiersState::empty(),
             terminal_manager: None,
+            canvas_manager: None,
             terminal_renderer: TerminalRenderer::new(),
             proxy: Some(proxy),
             redraw_pending: false,
@@ -221,6 +225,10 @@ impl App {
                     tm.destroy_terminal(&panel_id);
                 }
                 self.terminal_renderer.invalidate_panel_cache(&panel_id);
+                // Destroy canvas if this is a canvas panel
+                if let Some(cm) = &mut self.canvas_manager {
+                    cm.destroy_canvas(&panel_id);
+                }
                 if let Some(grid) = self.grid.as_mut() {
                     if operations::close_panel(grid, panel_id) {
                         self.panels.retain(|p| p.id != panel_id);
@@ -597,10 +605,52 @@ impl App {
 
             // === Canvas actions (Phase 3) ===
             InputAction::CreateCanvas => {
-                // Implemented in Task 2
+                if let Some(focused_id) = self.focused_panel {
+                    if let Some(grid) = self.grid.as_mut() {
+                        if let Some(new_id) =
+                            operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
+                        {
+                            let canvas_id = format!(
+                                "canvas-{}",
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs()
+                            );
+                            let panel = Panel::new_canvas(new_id, canvas_id.clone());
+                            self.panels.push(panel);
+                            self.focused_panel = Some(new_id);
+                            self.recompute_layout();
+
+                            // Create canvas webview
+                            let bounds = self.panel_content_bounds(new_id);
+                            if let (Some(cm), Some(window), Some(proxy)) =
+                                (&mut self.canvas_manager, &self.window, &self.proxy)
+                            {
+                                if let Err(e) = cm.create_canvas(
+                                    new_id,
+                                    &canvas_id,
+                                    window,
+                                    bounds,
+                                    proxy.clone(),
+                                ) {
+                                    warn!("Failed to create canvas: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            InputAction::CanvasIpcMessage { panel_id: _, message: _ } => {
-                // Implemented in Task 2
+            InputAction::CanvasIpcMessage { panel_id, message } => {
+                if let Some(cm) = &mut self.canvas_manager {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&message) {
+                        if parsed.get("type").and_then(|t| t.as_str()) == Some("shortcut") {
+                            // Forward shortcut to Myco's input system (handled in Task 3)
+                            return;
+                        }
+                    }
+                    cm.handle_ipc_message(&panel_id, &message);
+                }
             }
 
             // === Markdown actions (Phase 3, Plan 02) ===
@@ -635,6 +685,21 @@ impl App {
         }
     }
 
+    /// Get the content bounds (below panel title) for a panel in logical pixels.
+    fn panel_content_bounds(&self, panel_id: PanelId) -> (f32, f32, f32, f32) {
+        if let Some(grid) = &self.grid {
+            if let Some(node_id) = grid.find_node(panel_id) {
+                let (x, y, w, h) = grid.get_panel_rect(node_id);
+                let content_x = x;
+                let content_y = y + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+                let content_w = w;
+                let content_h = h - PANEL_TITLE_HEIGHT;
+                return (content_x, content_y, content_w, content_h);
+            }
+        }
+        (0.0, 0.0, 400.0, 300.0) // Fallback
+    }
+
     /// Recompute grid layout and divider positions.
     fn recompute_layout(&mut self) {
         if let (Some(grid), Some(window)) = (self.grid.as_mut(), self.window.as_ref()) {
@@ -645,6 +710,16 @@ impl App {
                 let grid_height = h - TITLE_BAR_HEIGHT;
                 grid.compute(w, grid_height.max(1.0));
                 self.dividers = compute_dividers(grid, w, grid_height.max(1.0));
+            }
+        }
+
+        // Resize canvas webviews to match new layout
+        if let Some(cm) = &self.canvas_manager {
+            for panel in &self.panels {
+                if panel.panel_type == PanelType::Canvas {
+                    let bounds = self.panel_content_bounds(panel.id);
+                    cm.resize(&panel.id, bounds);
+                }
             }
         }
     }
@@ -1136,7 +1211,10 @@ impl ApplicationHandler<UserEvent> for App {
         // Create terminal manager with current directory as project dir (D-02)
         let project_dir =
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-        let mut tm = TerminalManager::new(project_dir);
+        let mut tm = TerminalManager::new(project_dir.clone());
+
+        // Create canvas manager for TLDraw webview panels
+        self.canvas_manager = Some(CanvasManager::new(project_dir));
 
         // Create terminal in the initial panel
         let (_, _, pw, ph) = grid.get_panel_rect(grid.panel_nodes()[0].0);
