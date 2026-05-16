@@ -33,9 +33,6 @@ pub struct TerminalManager {
 }
 
 impl TerminalManager {
-    /// Create a new terminal manager for the given project directory.
-    ///
-    /// Per D-02: terminals start in the project folder.
     pub fn new(project_dir: PathBuf) -> Self {
         Self {
             terminals: HashMap::new(),
@@ -44,9 +41,6 @@ impl TerminalManager {
     }
 
     /// Create a new terminal for the given panel.
-    ///
-    /// Per D-02: uses project_dir as working directory.
-    /// Per D-04: inherits full parent environment.
     pub fn create_terminal(
         &mut self,
         panel_id: PanelId,
@@ -79,10 +73,14 @@ impl TerminalManager {
     /// Drain events from all terminals.
     ///
     /// Called in the main thread's about_to_wait handler.
-    pub fn drain_all_events(&mut self) {
+    pub fn drain_all_events(&mut self) -> bool {
+        let mut any = false;
         for terminal in self.terminals.values_mut() {
-            terminal.drain_events();
+            if terminal.drain_events() {
+                any = true;
+            }
         }
+        any
     }
 
     /// Get immutable access to the terminals map.

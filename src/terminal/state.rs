@@ -84,6 +84,9 @@ pub struct TerminalState {
     // --- Search state (D-09) ---
     /// Search overlay state machine.
     pub search: crate::terminal::search::SearchState,
+
+    /// Event listener handle for clearing the wake coalescing flag.
+    event_listener: MycoEventListener,
 }
 
 impl TerminalState {
@@ -137,6 +140,7 @@ impl TerminalState {
         let pty = tty::new(&pty_config, window_size, 0)?;
 
         // Create and spawn the background event loop
+        let listener_handle = event_listener.clone();
         let event_loop = EventLoop::new(
             term.clone(),
             event_listener,
@@ -166,6 +170,7 @@ impl TerminalState {
             has_new_output_while_scrolled: false,
             copy_flash_start: None,
             search: crate::terminal::search::SearchState::new(),
+            event_listener: listener_handle,
         })
     }
 
@@ -173,7 +178,7 @@ impl TerminalState {
     ///
     /// Called in the main thread's about_to_wait handler.
     /// Handles terminal events like exit, cursor blink changes, etc.
-    pub fn drain_events(&mut self) {
+    pub fn drain_events(&mut self) -> bool {
         let mut had_events = false;
         while let Ok(event) = self.event_rx.try_recv() {
             had_events = true;
@@ -213,6 +218,7 @@ impl TerminalState {
         if had_events {
             self.on_new_output();
         }
+        had_events
     }
 
     /// Update cursor blink state based on elapsed time.

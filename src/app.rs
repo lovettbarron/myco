@@ -4,9 +4,15 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
+use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, Window, WindowId};
+
+/// Custom event type for waking winit from background threads.
+#[derive(Debug, Clone)]
+pub enum UserEvent {
+    TerminalEvent,
+}
 
 use alacritty_terminal::grid::Dimensions as TermDimTrait;
 use crate::grid::divider::{
@@ -50,12 +56,14 @@ pub struct App {
     terminal_manager: Option<TerminalManager>,
     /// GPU terminal renderer (snapshot + buffer building, quad generation).
     terminal_renderer: TerminalRenderer,
-    /// Next frame deadline for ~60fps throttle.
-    next_frame: Instant,
+    /// Proxy for waking the event loop from background threads.
+    proxy: Option<EventLoopProxy<UserEvent>>,
+    /// Whether a redraw has been requested for the current frame.
+    redraw_pending: bool,
 }
 
-impl Default for App {
-    fn default() -> Self {
+impl App {
+    pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
         Self {
             window: None,
             renderer: None,
@@ -70,7 +78,8 @@ impl Default for App {
             modifiers: ModifiersState::empty(),
             terminal_manager: None,
             terminal_renderer: TerminalRenderer::new(),
-            next_frame: Instant::now(),
+            proxy: Some(proxy),
+            redraw_pending: false,
         }
     }
 }
@@ -941,7 +950,21 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<UserEvent> for App {
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
+        if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: UserEvent) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         // Only initialize once
         if self.window.is_some() {
@@ -1030,6 +1053,18 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        match &event {
+            WindowEvent::KeyboardInput { .. }
+            | WindowEvent::MouseInput { .. }
+            | WindowEvent::MouseWheel { .. }
+            | WindowEvent::Resized(_)
+            | WindowEvent::Focused(_) => {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            _ => {}
+        }
         match event {
             WindowEvent::CloseRequested => {
                 info!("Close requested -- exiting");
@@ -1254,33 +1289,32 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        const FRAME_BUDGET: Duration = Duration::from_millis(16); // ~60fps
+        const ACTIVE_INTERVAL: Duration = Duration::from_millis(16);
+        const IDLE_INTERVAL: Duration = Duration::from_millis(500);
 
-        // Drain terminal events and update cursor blinks
-        let mut needs_redraw = false;
+        let mut dirty = false;
         if let Some(tm) = &mut self.terminal_manager {
-            tm.drain_all_events();
+            if tm.drain_all_events() {
+                dirty = true;
+            }
             if tm.update_all_cursor_blinks() {
-                needs_redraw = true;
+                dirty = true;
             }
             for ts in tm.terminals_mut().values_mut() {
                 ts.clear_expired_flash();
             }
         }
 
-        let now = Instant::now();
-        if now >= self.next_frame {
-            needs_redraw = true;
+        // Poll frequently when terminal has activity, slowly when idle (cursor blink only).
+        let has_terminals = self.terminal_manager.as_ref()
+            .map_or(false, |tm| !tm.terminals().is_empty());
+        if has_terminals {
+            let interval = if dirty { ACTIVE_INTERVAL } else { IDLE_INTERVAL };
+            event_loop.set_control_flow(
+                winit::event_loop::ControlFlow::WaitUntil(Instant::now() + interval)
+            );
+        } else {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
         }
-
-        if needs_redraw {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
-            // Schedule next frame from NOW, not from the old deadline —
-            // prevents perpetual catch-up when frames take longer than budget.
-            self.next_frame = Instant::now() + FRAME_BUDGET;
-        }
-        event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(self.next_frame));
     }
 }
