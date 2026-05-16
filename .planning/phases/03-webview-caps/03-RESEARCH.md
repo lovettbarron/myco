@@ -681,24 +681,28 @@ pub enum UserEvent {
 | A5 | pulldown-cmark's event iterator provides sufficient information to render "pretty GFM" without needing Warp's more specialized parser | Standard Stack | Low risk: pulldown-cmark handles tables, task lists, strikethrough, code blocks. Phase 3 scope excludes advanced features (math, callouts). |
 | A6 | wry custom protocol handler runs synchronously on macOS and can serve bundled assets from memory without blocking the main thread | Architecture Patterns | Low risk: wry docs describe synchronous handler as suitable for "serving static assets from memory." TLDraw bundle is loaded from embedded bytes. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Focus routing reliability on macOS**
+   - **RESOLVED:** Plan 01 Task 3 implements a focus routing spike (create webview, test focus_parent(), verify winit receives KeyboardInput events). Architecture proceeds if spike passes.
    - What we know: wry provides `focus()` and `focus_parent()`. On macOS, `focus_parent()` calls `window.makeFirstResponder(ns_view)`. The WebView struct holds a reference to the NSView for this purpose.
    - What's unclear: Whether winit's event loop reliably receives `KeyboardInput` events after `focus_parent()` is called. Discussion #1227 is unanswered. Bevy issue #17686 is Windows-specific.
    - Recommendation: Implement a prototype spike in the first plan that creates a webview, focuses it, calls focus_parent(), and verifies winit receives keyboard events. This must pass before committing to the full focus routing architecture.
 
 2. **Warp markdown_parser vs. pulldown-cmark**
+   - **RESOLVED:** Using pulldown-cmark 0.13.3 per Claude's Discretion. Standalone, MIT, event iterator maps directly to glyphon spans. Avoids Warp monorepo extraction complexity.
    - What we know: D-07 specifies Warp's parser. Claude's discretion allows alternative. Warp's parser outputs FormattedText/FormattedTextLine/FormattedTextFragment (nom-based, depends on nom/html5ever/serde_yaml/itertools/anyhow/thiserror). pulldown-cmark (MIT) outputs Event iterator.
    - What's unclear: Whether the team strongly prefers Warp's parser despite extraction complexity. The adaptation layer to glyphon spans is similar effort either way.
    - Recommendation: Use pulldown-cmark. It's standalone, MIT, well-maintained (0.13.3 released Mar 2026), and its event iterator maps directly to the styled block model needed for GPU rendering. Avoids workspace extraction complexity entirely.
 
 3. **TLDraw bundle strategy**
+   - **RESOLVED:** Plan 01 Task 1 creates a Vite + React + TLDraw project, builds it, and bundles output as app resources served via wry custom protocol.
    - What we know: TLDraw 5.0.1 is React 18+. It needs bundling. Self-hosting assets is supported. Custom protocol serving works for static assets.
    - What's unclear: Exact bundle size after Vite production build. Whether TLDraw clipboard operations work in WKWebView. Whether WebGL features of TLDraw render correctly.
    - Recommendation: Create a minimal Vite + React + TLDraw project, build it, measure output, and test in a standalone wry webview before integrating into Myco. This is a natural first task for the phase.
 
 4. **Sidebar rendering approach**
+   - **RESOLVED:** Plan 03 implements flat list of FileEntry structs with 28px row height, scroll offset, viewport culling. SidebarRenderer produces glyphon Buffers and QuadInstances.
    - What we know: D-10 specifies GPU-rendered. D-11 specifies fixed-width, left edge, outside grid.
    - What's unclear: How to handle sidebar scrolling for deep file trees. Whether to use the same TextLabel approach or build a more structured line-based renderer.
    - Recommendation: Use flat list of TextLabel entries with a scroll offset. Each file entry is one line (28px height matching PANEL_TITLE_HEIGHT). Viewport cull entries outside visible area. Keep simple -- Phase 4 adds polish.
