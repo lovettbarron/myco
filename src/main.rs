@@ -1,5 +1,6 @@
 mod app;
 mod grid;
+mod input;
 mod platform;
 mod renderer;
 mod theme;

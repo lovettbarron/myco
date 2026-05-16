@@ -22,6 +22,7 @@ pub enum Orientation {
 
 /// A single divider between grid tracks.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Divider {
     /// Whether this divider is vertical (between columns) or horizontal (between rows).
     pub orientation: Orientation,
