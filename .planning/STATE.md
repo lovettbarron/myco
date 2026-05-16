@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 Phase: 2
 Plan: 2 of 2 complete
 Status: Ready to execute
-Last activity: 2026-05-16
+Last activity: 2026-05-16 - Completed quick task 260516-gw3: Add dev-mode performance instrumentation to render hot path
 
 Progress: [██████████] 100%
 
@@ -89,6 +89,12 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 None yet.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260516-gw3 | Add dev-mode performance instrumentation to render hot path | 2026-05-16 | 1ed7bef | [260516-gw3-add-dev-mode-performance-instrumentation](./quick/260516-gw3-add-dev-mode-performance-instrumentation/) |
 
 ### Blockers/Concerns
 
