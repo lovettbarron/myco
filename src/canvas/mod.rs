@@ -102,7 +102,7 @@ impl CanvasManager {
                 let _ = proxy.send_event(UserEvent::CanvasMessage(panel_id, msg));
             })
             .with_focused(false)
-            .with_navigation_handler(|_url| false) // Block external navigation (security T-03-03)
+            .with_navigation_handler(|url| url.starts_with("myco://")) // Allow custom protocol, block external (T-03-03)
             .build_as_child(window)?;
 
         Ok(webview)
