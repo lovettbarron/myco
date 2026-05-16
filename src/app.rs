@@ -163,6 +163,23 @@ impl App {
             InputAction::FocusPanel { panel_id } => {
                 self.focused_panel = Some(panel_id);
             }
+            // Terminal actions -- handled in Task 3
+            InputAction::TerminalInput { .. }
+            | InputAction::TerminalScroll { .. }
+            | InputAction::TerminalCopy { .. }
+            | InputAction::TerminalPaste { .. }
+            | InputAction::TerminalFontSizeChange { .. }
+            | InputAction::TerminalSearchOpen { .. }
+            | InputAction::TerminalSearchClose { .. }
+            | InputAction::TerminalSearchNext { .. }
+            | InputAction::TerminalSearchPrev { .. }
+            | InputAction::TerminalSearchUpdate { .. }
+            | InputAction::TerminalSelectionStart { .. }
+            | InputAction::TerminalSelectionUpdate { .. }
+            | InputAction::TerminalSelectionEnd { .. }
+            | InputAction::CreateTerminal => {
+                // Stub: terminal integration in Task 3
+            }
         }
     }
 

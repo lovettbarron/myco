@@ -1,8 +1,43 @@
 //! GPU terminal renderer -- produces quads and text areas for the character grid.
 //!
-//! Full implementation in Task 2. This stub allows the module to compile.
+//! Uses the snapshot pattern: lock the Term briefly to copy cell data, then
+//! build glyphon Buffers from the snapshot without holding the lock.
+//! This avoids blocking the PTY event loop during GPU text shaping.
 
-use super::colors::AnsiPalette;
+use std::sync::Arc;
+
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::Point;
+use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::Term;
+use alacritty_terminal::vte::ansi::{Color, CursorShape};
+use glyphon::cosmic_text::{self, Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
+use glyphon::Color as GlyphonColor;
+
+use super::colors::{resolve_bg, resolve_fg, AnsiPalette};
+use super::event_listener::MycoEventListener;
+use crate::renderer::quad_renderer::QuadInstance;
+use crate::renderer::text_renderer::TerminalTextAreaMeta;
+
+/// Snapshot of the terminal grid state, copied while the lock is held.
+///
+/// Separates lock acquisition from rendering work (per Pitfall 1).
+pub struct TerminalSnapshot {
+    pub rows: Vec<Vec<SnapshotCell>>,
+    pub cursor_point: Point,
+    pub cursor_shape: CursorShape,
+    pub display_offset: usize,
+    pub cols: usize,
+}
+
+/// A single cell from the terminal grid snapshot.
+pub struct SnapshotCell {
+    pub c: char,
+    pub fg: Color,
+    pub bg: Color,
+    pub flags: Flags,
+}
 
 /// GPU character grid renderer for terminal panels.
 ///
@@ -28,5 +63,356 @@ impl TerminalRenderer {
             cell_width: 14.0 * 0.6,
             cell_height: 14.0 * 1.3,
         }
+    }
+
+    /// Compute cell dimensions from font metrics.
+    ///
+    /// Creates a temporary Buffer, sets text to "M" in monospace, shapes it,
+    /// and reads the advance width. Returns (cell_width, cell_height).
+    pub fn compute_cell_dimensions(font_system: &mut FontSystem, font_size: f32) -> (f32, f32) {
+        let line_height = font_size * 1.3;
+        let metrics = Metrics::new(font_size, line_height);
+        let mut buffer = Buffer::new(font_system, metrics);
+        buffer.set_size(font_system, Some(font_size * 4.0), Some(line_height * 2.0));
+        buffer.set_text(
+            font_system,
+            "M",
+            &Attrs::new().family(Family::Monospace),
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(font_system, false);
+
+        // Try to read the advance width from the shaped layout
+        let cell_width = buffer
+            .layout_runs()
+            .next()
+            .and_then(|run| run.glyphs.first())
+            .map(|glyph| glyph.w)
+            .unwrap_or(font_size * 0.6);
+
+        (cell_width, line_height)
+    }
+
+    /// Take a snapshot of the terminal grid state.
+    ///
+    /// Locks the term briefly, copies all visible cell data, then unlocks.
+    /// The returned snapshot can be used for rendering without holding the lock.
+    pub fn snapshot(term: &Arc<FairMutex<Term<MycoEventListener>>>) -> TerminalSnapshot {
+        let term = term.lock();
+        let content = term.renderable_content();
+
+        let num_lines = term.screen_lines();
+        let num_cols = term.columns();
+        let display_offset = content.display_offset;
+
+        // Cursor info
+        let cursor_point = content.cursor.point;
+        let cursor_shape = content.cursor.shape;
+
+        // Copy all visible cells into rows
+        let mut rows: Vec<Vec<SnapshotCell>> = Vec::with_capacity(num_lines);
+        for _ in 0..num_lines {
+            rows.push(Vec::with_capacity(num_cols));
+        }
+
+        for indexed in content.display_iter {
+            let line = indexed.point.line.0;
+            // display_iter uses negative line indices for scrollback
+            // Convert to 0-based row index for our snapshot
+            let row_idx = (line + display_offset as i32) as usize;
+            if row_idx < num_lines {
+                rows[row_idx].push(SnapshotCell {
+                    c: indexed.cell.c,
+                    fg: indexed.cell.fg,
+                    bg: indexed.cell.bg,
+                    flags: indexed.cell.flags,
+                });
+            }
+        }
+
+        TerminalSnapshot {
+            rows,
+            cursor_point,
+            cursor_shape,
+            display_offset,
+            cols: num_cols,
+        }
+    }
+
+    /// Build per-row glyphon Buffers from a terminal snapshot.
+    ///
+    /// This is the second step of the snapshot + prepare_buffers two-step API.
+    /// No lock is held during this operation.
+    pub fn prepare_buffers(
+        &self,
+        font_system: &mut FontSystem,
+        snapshot: &TerminalSnapshot,
+        viewport_x: f32,
+        viewport_y: f32,
+        viewport_w: f32,
+        viewport_h: f32,
+    ) -> (Vec<Buffer>, Vec<TerminalTextAreaMeta>) {
+        let mut buffers = Vec::new();
+        let mut metas = Vec::new();
+
+        let metrics = Metrics::new(self.font_size, self.cell_height);
+
+        for (row_idx, row_cells) in snapshot.rows.iter().enumerate() {
+            if row_cells.is_empty() {
+                continue;
+            }
+
+            let top = viewport_y + (row_idx as f32) * self.cell_height;
+
+            // Skip rows that are outside the visible viewport
+            if top + self.cell_height < viewport_y || top > viewport_y + viewport_h {
+                continue;
+            }
+
+            // Build rich text spans grouped by foreground color
+            let spans = self.build_row_spans(row_cells);
+            if spans.is_empty() {
+                continue;
+            }
+
+            let mut buffer = Buffer::new(font_system, metrics);
+            buffer.set_size(font_system, Some(viewport_w), Some(self.cell_height));
+
+            let span_refs: Vec<(&str, Attrs)> = spans
+                .iter()
+                .map(|(text, attrs)| (text.as_str(), attrs.clone()))
+                .collect();
+            buffer.set_rich_text(
+                font_system,
+                span_refs,
+                &Attrs::new().family(Family::Monospace),
+                Shaping::Advanced,
+                None,
+            );
+            buffer.shape_until_scroll(font_system, false);
+
+            let left = viewport_x;
+
+            metas.push(TerminalTextAreaMeta {
+                left,
+                top,
+                bounds_left: viewport_x as i32,
+                bounds_top: viewport_y as i32,
+                bounds_right: (viewport_x + viewport_w) as i32,
+                bounds_bottom: (viewport_y + viewport_h) as i32,
+                default_color: GlyphonColor::rgb(
+                    self.palette.foreground[0],
+                    self.palette.foreground[1],
+                    self.palette.foreground[2],
+                ),
+            });
+            buffers.push(buffer);
+        }
+
+        (buffers, metas)
+    }
+
+    /// Build rich text spans for a single row, grouped by foreground color.
+    ///
+    /// Skips WIDE_CHAR_SPACER cells (per Pitfall 3).
+    fn build_row_spans(&self, cells: &[SnapshotCell]) -> Vec<(String, Attrs<'static>)> {
+        let mut spans: Vec<(String, Attrs<'static>)> = Vec::new();
+        let mut current_text = String::new();
+        let mut current_fg: Option<[u8; 3]> = None;
+
+        for cell in cells {
+            // Skip spacer cells for wide characters (per Pitfall 3)
+            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                continue;
+            }
+
+            let rgb = resolve_fg(cell.fg, &self.palette);
+            let same_attrs = current_fg == Some(rgb);
+
+            if !same_attrs && !current_text.is_empty() {
+                let [r, g, b] = current_fg.unwrap();
+                spans.push((
+                    std::mem::take(&mut current_text),
+                    Attrs::new()
+                        .family(Family::Monospace)
+                        .color(cosmic_text::Color::rgb(r, g, b)),
+                ));
+            }
+
+            current_fg = Some(rgb);
+            current_text.push(cell.c);
+        }
+
+        // Push final span
+        if !current_text.is_empty() {
+            if let Some([r, g, b]) = current_fg {
+                spans.push((
+                    current_text,
+                    Attrs::new()
+                        .family(Family::Monospace)
+                        .color(cosmic_text::Color::rgb(r, g, b)),
+                ));
+            }
+        }
+
+        spans
+    }
+
+    /// Build quad instances for terminal backgrounds and cursor.
+    ///
+    /// Produces quads for:
+    /// - Cell backgrounds that differ from the panel background
+    /// - Cursor quad (block, beam, or underline based on cursor shape)
+    pub fn build_terminal_quads(
+        &self,
+        snapshot: &TerminalSnapshot,
+        viewport_x: f32,
+        viewport_y: f32,
+        _viewport_w: f32,
+        _viewport_h: f32,
+        panel_bg: [f32; 4],
+        cursor_visible: bool,
+    ) -> Vec<QuadInstance> {
+        let mut quads = Vec::new();
+
+        // Panel background RGB as u8 for comparison
+        let bg_rgb = [
+            (panel_bg[0] * 255.0) as u8,
+            (panel_bg[1] * 255.0) as u8,
+            (panel_bg[2] * 255.0) as u8,
+        ];
+
+        // Cell background quads: only render where cell bg differs from panel bg
+        for (row_idx, row_cells) in snapshot.rows.iter().enumerate() {
+            let y = viewport_y + (row_idx as f32) * self.cell_height;
+            let mut col_idx: usize = 0;
+
+            for cell in row_cells {
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    col_idx += 1;
+                    continue;
+                }
+
+                let cell_bg = resolve_bg(cell.bg, &self.palette);
+
+                // Only render background quads when they differ from the panel background
+                // (per Pitfall 5: avoid visible grid pattern)
+                let differs = (cell_bg[0] as i16 - bg_rgb[0] as i16).abs() > 2
+                    || (cell_bg[1] as i16 - bg_rgb[1] as i16).abs() > 2
+                    || (cell_bg[2] as i16 - bg_rgb[2] as i16).abs() > 2;
+
+                if differs {
+                    let x = viewport_x + (col_idx as f32) * self.cell_width;
+                    let w = if cell.flags.contains(Flags::WIDE_CHAR) {
+                        self.cell_width * 2.0
+                    } else {
+                        self.cell_width
+                    };
+
+                    quads.push(QuadInstance {
+                        position: [x, y],
+                        size: [w, self.cell_height],
+                        color: [
+                            cell_bg[0] as f32 / 255.0,
+                            cell_bg[1] as f32 / 255.0,
+                            cell_bg[2] as f32 / 255.0,
+                            1.0,
+                        ],
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                }
+
+                col_idx += 1;
+            }
+        }
+
+        // Cursor quad
+        if cursor_visible && snapshot.cursor_shape != CursorShape::Hidden {
+            let cursor_row = snapshot.cursor_point.line.0 as usize;
+            let cursor_col = snapshot.cursor_point.column.0;
+            let cursor_x = viewport_x + (cursor_col as f32) * self.cell_width;
+            let cursor_y = viewport_y + (cursor_row as f32) * self.cell_height;
+
+            // Cursor color: use foreground color
+            let cursor_color = [
+                self.palette.foreground[0] as f32 / 255.0,
+                self.palette.foreground[1] as f32 / 255.0,
+                self.palette.foreground[2] as f32 / 255.0,
+                0.8,
+            ];
+
+            match snapshot.cursor_shape {
+                CursorShape::Block => {
+                    quads.push(QuadInstance {
+                        position: [cursor_x, cursor_y],
+                        size: [self.cell_width, self.cell_height],
+                        color: cursor_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                }
+                CursorShape::Beam => {
+                    // Thin vertical line (2px wide)
+                    quads.push(QuadInstance {
+                        position: [cursor_x, cursor_y],
+                        size: [2.0, self.cell_height],
+                        color: cursor_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                }
+                CursorShape::Underline => {
+                    // Thin horizontal line at bottom (2px tall)
+                    quads.push(QuadInstance {
+                        position: [cursor_x, cursor_y + self.cell_height - 2.0],
+                        size: [self.cell_width, 2.0],
+                        color: cursor_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                }
+                CursorShape::HollowBlock => {
+                    // Hollow block: draw 4 edges as thin quads
+                    let border = 1.5;
+                    // Top edge
+                    quads.push(QuadInstance {
+                        position: [cursor_x, cursor_y],
+                        size: [self.cell_width, border],
+                        color: cursor_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                    // Bottom edge
+                    quads.push(QuadInstance {
+                        position: [cursor_x, cursor_y + self.cell_height - border],
+                        size: [self.cell_width, border],
+                        color: cursor_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                    // Left edge
+                    quads.push(QuadInstance {
+                        position: [cursor_x, cursor_y],
+                        size: [border, self.cell_height],
+                        color: cursor_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                    // Right edge
+                    quads.push(QuadInstance {
+                        position: [cursor_x + self.cell_width - border, cursor_y],
+                        size: [border, self.cell_height],
+                        color: cursor_color,
+                        corner_radius: 0.0,
+                        _padding: 0.0,
+                    });
+                }
+                CursorShape::Hidden => {} // Already filtered above
+            }
+        }
+
+        quads
     }
 }

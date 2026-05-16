@@ -34,6 +34,34 @@ pub enum InputAction {
     SetCursor(CursorStyle),
     /// Focus a panel.
     FocusPanel { panel_id: PanelId },
+    /// Write raw bytes to a terminal's PTY.
+    TerminalInput { panel_id: PanelId, bytes: Vec<u8> },
+    /// Scroll terminal by delta lines (positive = up/back in history).
+    TerminalScroll { panel_id: PanelId, delta: i32 },
+    /// Copy selected text or send SIGINT if no selection (D-13).
+    TerminalCopy { panel_id: PanelId },
+    /// Paste clipboard contents into terminal.
+    TerminalPaste { panel_id: PanelId },
+    /// Change terminal font size by delta (D-05/TERM-07).
+    TerminalFontSizeChange { panel_id: PanelId, delta: f32 },
+    /// Open search overlay (D-09).
+    TerminalSearchOpen { panel_id: PanelId },
+    /// Close search overlay.
+    TerminalSearchClose { panel_id: PanelId },
+    /// Navigate to next search match.
+    TerminalSearchNext { panel_id: PanelId },
+    /// Navigate to previous search match.
+    TerminalSearchPrev { panel_id: PanelId },
+    /// Update search query text.
+    TerminalSearchUpdate { panel_id: PanelId, query: String },
+    /// Start text selection at a grid point.
+    TerminalSelectionStart { panel_id: PanelId, x: f32, y: f32, block: bool },
+    /// Update selection endpoint.
+    TerminalSelectionUpdate { panel_id: PanelId, x: f32, y: f32 },
+    /// End selection (mouse released).
+    TerminalSelectionEnd { panel_id: PanelId },
+    /// Create new terminal panel (from menu/shortcut).
+    CreateTerminal,
 }
 
 /// Cursor styles for different interaction states.

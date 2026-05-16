@@ -171,4 +171,14 @@ impl Renderer {
     pub fn format(&self) -> wgpu::TextureFormat {
         self.gpu_state.format()
     }
+
+    /// Access the text engine mutably for terminal text rendering.
+    pub fn text_engine_mut(&mut self) -> &mut TextEngine {
+        &mut self.text_engine
+    }
+
+    /// Load font data into the text engine's font system.
+    pub fn load_font_data(&mut self, data: Vec<u8>) {
+        self.text_engine.load_font_data(data);
+    }
 }

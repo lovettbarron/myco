@@ -9,12 +9,15 @@ pub struct PanelId(pub u64);
 pub enum PanelType {
     /// Placeholder panel -- displays a themed background with centered type label.
     Placeholder,
+    /// Terminal panel -- GPU-rendered terminal emulator with PTY.
+    Terminal,
 }
 
 impl std::fmt::Display for PanelType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PanelType::Placeholder => write!(f, "Placeholder"),
+            PanelType::Terminal => write!(f, "Terminal"),
         }
     }
 }
@@ -37,6 +40,15 @@ impl Panel {
             id,
             panel_type: PanelType::Placeholder,
             title: "Placeholder".into(),
+        }
+    }
+
+    /// Create a new terminal panel with the given ID.
+    pub fn new_terminal(id: PanelId) -> Self {
+        Self {
+            id,
+            panel_type: PanelType::Terminal,
+            title: "Terminal".into(),
         }
     }
 }
