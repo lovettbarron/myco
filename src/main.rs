@@ -2,6 +2,7 @@ mod app;
 mod canvas;
 mod grid;
 mod input;
+mod markdown;
 mod platform;
 mod renderer;
 mod terminal;
