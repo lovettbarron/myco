@@ -75,7 +75,7 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 03-01-PLAN.md -- TLDraw canvas via wry webview (bundled assets, custom protocol, IPC auto-save, focus routing)
+- [x] 03-01-PLAN.md -- TLDraw canvas via wry webview (bundled assets, custom protocol, IPC auto-save, focus routing)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 03-02-PLAN.md -- GPU-rendered markdown viewer with live file updates (pulldown-cmark parser, glyphon rendering, notify watcher)
@@ -143,7 +143,7 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 |-------|----------------|--------|-----------|
 | 1. Window, Grid, and Build Pipeline | 0/4 | Planning complete | - |
 | 2. Terminal Cap | 2/2 | Complete   | 2026-05-16 |
-| 3. Webview Caps | 0/3 | Planning complete | - |
+| 3. Webview Caps | 1/3 | Executing | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |
 | 5. Configuration and Persistence | 0/2 | Not started | - |
 | 6. AI Monitoring and Ship | 0/1 | Not started | - |

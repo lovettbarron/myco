@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 planning complete
-last_updated: "2026-05-16T12:30:00.000Z"
-last_activity: "2026-05-16 - Phase 3 planned: 3 plans in 3 waves (webview caps)"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-05-16T11:20:23Z"
+last_activity: 2026-05-16 -- Phase 03 Plan 01 complete (TLDraw canvas cap)
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 9
-  completed_plans: 6
-  percent: 66
+  completed_plans: 7
+  percent: 78
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 
 ## Current Position
 
-Phase: 3
-Plan: 0 of 3 complete
-Status: Ready to execute
-Last activity: 2026-05-16 - Phase 3 planned: 3 plans in 3 waves (webview caps)
+Phase: 03 (webview-caps) — EXECUTING
+Plan: 2 of 3
+Status: Plan 01 complete, Plan 02 next
+Last activity: 2026-05-16 -- Phase 03 Plan 01 complete (TLDraw canvas cap)
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 78%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [██████████] 100%
 | Phase 01 P03 | 13 | 2 tasks | 9 files |
 | Phase 02 P01 | 45 min | 3 tasks | 16 files |
 | Phase 02 P02 | 12 min | 3 tasks | 11 files |
+| Phase 03 P01 | 10 min | 3 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,10 @@ Recent decisions affecting current work:
 - [02-02]: regex_syntax::escape is the correct path (not regex_automata::util::syntax::escape)
 - [02-02]: alacritty_terminal::index::Side (not selection::Side) for Selection new/update
 - [02-02]: Dimensions trait must be imported to call screen_lines()/history_size() on Term
+- [03-01]: wry 0.55.1 custom protocol returns Response<Cow<'static, [u8]>> -- needs http crate dep
+- [03-01]: Pending action queue pattern for safe re-entrant action dispatch from IPC shortcuts
+- [03-01]: Assets loaded from filesystem at runtime (include_bytes! for index.html fallback only)
+- [03-01]: TLDraw 5.0.1 store.listen with scope:'document', source:'user' for auto-save debounce
 
 ### Pending Todos
 
@@ -112,6 +117,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T10:23:44.843Z
-Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-webview-caps/03-UI-SPEC.md
+Last session: 2026-05-16T11:20:23Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: .planning/phases/03-webview-caps/03-02-PLAN.md

@@ -30,8 +30,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Workspace Caps
 
-- [ ] **CAP-01**: User can open a TLDraw canvas cap that displays an embedded TLDraw instance via webview
-- [ ] **CAP-02**: TLDraw canvas saves its state as a .tldr file in the project folder automatically
+- [x] **CAP-01**: User can open a TLDraw canvas cap that displays an embedded TLDraw instance via webview
+- [x] **CAP-02**: TLDraw canvas saves its state as a .tldr file in the project folder automatically
 - [ ] **CAP-03**: User can open a markdown viewer cap that renders .md files with Obsidian-flavored formatting
 - [ ] **CAP-04**: Markdown viewer updates live when the underlying file changes on disk
 
@@ -152,8 +152,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TERM-07 | Phase 2 | Complete |
 | TERM-08 | Phase 2 | Complete |
 | TERM-09 | Phase 2 | Complete |
-| CAP-01 | Phase 3 | Pending |
-| CAP-02 | Phase 3 | Pending |
+| CAP-01 | Phase 3 | Complete |
+| CAP-02 | Phase 3 | Complete |
 | CAP-03 | Phase 3 | Pending |
 | CAP-04 | Phase 3 | Pending |
 | FRAME-01 | Phase 4 | Pending |
