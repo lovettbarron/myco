@@ -1,5 +1,6 @@
 pub mod gpu_state;
 pub mod quad_renderer;
+pub mod text_renderer;
 
 use std::sync::Arc;
 use tracing::warn;
@@ -7,6 +8,7 @@ use winit::window::Window;
 
 use gpu_state::GpuState;
 use quad_renderer::{QuadInstance, QuadRenderer};
+use text_renderer::{TextEngine, TextLabel};
 
 /// Represents the outcome of a render attempt.
 #[derive(Debug)]
@@ -21,11 +23,12 @@ pub enum RenderResult {
 
 /// Renderer orchestrates the GPU render pipeline.
 ///
-/// Manages the quad renderer for instanced rectangle drawing.
-/// TextEngine integration will be added in Task 2 of Plan 01-02.
+/// Manages the quad renderer for instanced rectangle drawing
+/// and the text engine for glyphon-based text rendering.
 pub struct Renderer {
     gpu_state: GpuState,
     quad_renderer: QuadRenderer,
+    text_engine: TextEngine,
 }
 
 impl Renderer {
@@ -36,9 +39,12 @@ impl Renderer {
     pub fn new(window: Arc<Window>) -> Self {
         let gpu_state = pollster::block_on(GpuState::new(window));
         let quad_renderer = QuadRenderer::new(gpu_state.device(), gpu_state.format());
+        let text_engine =
+            TextEngine::new(gpu_state.device(), gpu_state.queue(), gpu_state.format());
         Self {
             gpu_state,
             quad_renderer,
+            text_engine,
         }
     }
 
@@ -47,14 +53,15 @@ impl Renderer {
         self.gpu_state.resize(width, height);
     }
 
-    /// Render a frame with the given clear color, quads, and viewport dimensions.
+    /// Render a frame with quads and text labels.
     ///
-    /// Quads are rendered in a single render pass on top of the clear color.
+    /// Quads render first, then text on top, all in a single render pass.
     /// Uses wgpu 29's `CurrentSurfaceTexture` enum (not the old `Result<_, SurfaceError>`).
     pub fn render(
         &mut self,
         clear_color: [f32; 4],
         quads: &[QuadInstance],
+        labels: &[TextLabel],
         viewport_width: f32,
         viewport_height: f32,
     ) -> RenderResult {
@@ -65,6 +72,15 @@ impl Renderer {
             quads,
             viewport_width,
             viewport_height,
+        );
+
+        // Prepare text data
+        self.text_engine.prepare(
+            self.gpu_state.device(),
+            self.gpu_state.queue(),
+            labels,
+            viewport_width as u32,
+            viewport_height as u32,
         );
 
         let surface_texture = self.gpu_state.surface().get_current_texture();
@@ -130,7 +146,8 @@ impl Renderer {
             });
             // Draw quads (panel backgrounds, title bar, etc.)
             self.quad_renderer.render(&mut pass);
-            // Task 2: text_engine.render(&mut pass);
+            // Draw text ON TOP of quads (labels, breadcrumb, etc.)
+            self.text_engine.render(&mut pass);
         }
 
         self.gpu_state
