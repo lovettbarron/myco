@@ -37,6 +37,15 @@ pub fn handle_key_event(
         return handle_search_key(event, modifiers, panel_id);
     }
 
+    // Canvas-focused key routing: only intercept Cmd-shortcuts
+    // All other keys reach the webview via macOS first responder
+    if panel_type == Some(PanelType::Canvas) {
+        if modifiers.super_key() {
+            return handle_generic_key(event, modifiers, panel_id);
+        }
+        return None; // Let webview handle non-Cmd keys
+    }
+
     // Terminal-focused key routing
     if panel_type == Some(PanelType::Terminal) {
         return handle_terminal_key(event, modifiers, panel_id, term_mode);
@@ -66,6 +75,10 @@ fn handle_terminal_key(
                 "w" => return Some(InputAction::PanelClose { panel_id }),
                 // Terminal-specific shortcuts
                 "t" => return Some(InputAction::CreateTerminal),
+                "T" => return Some(InputAction::CreateCanvas), // Cmd+Shift+T
+                "b" => return Some(InputAction::ToggleSidebar),
+                "]" => return Some(InputAction::FocusNextPanel),
+                "[" => return Some(InputAction::FocusPrevPanel),
                 "c" => return Some(InputAction::TerminalCopy { panel_id }),
                 "v" => return Some(InputAction::TerminalPaste { panel_id }),
                 "f" => return Some(InputAction::TerminalSearchOpen { panel_id }),
@@ -157,6 +170,10 @@ fn handle_generic_key(
             "D" => Some(InputAction::PanelSplitVertical { panel_id }),
             "w" => Some(InputAction::PanelClose { panel_id }),
             "t" => Some(InputAction::CreateTerminal),
+            "T" => Some(InputAction::CreateCanvas), // Cmd+Shift+T
+            "b" => Some(InputAction::ToggleSidebar),
+            "]" => Some(InputAction::FocusNextPanel),
+            "[" => Some(InputAction::FocusPrevPanel),
             _ => None,
         },
         _ => None,

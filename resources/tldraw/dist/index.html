@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html class="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Myco Canvas</title>
+    <style>
+        html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #1E1E24; }
+        .tldraw-container { position: fixed; inset: 0; }
+        body.unfocused { filter: saturate(0.3) brightness(0.7); transition: filter 150ms ease; }
+        body.focused { filter: none; transition: filter 150ms ease; }
+    </style>
+  <script type="module" crossorigin src="./tldraw-app.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index.css">
+</head>
+<body class="focused">
+    <div id="root" class="tldraw-container"></div>
+</body>
+</html>

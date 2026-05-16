@@ -8,12 +8,6 @@ use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, Window, WindowId};
 
-/// Custom event type for waking winit from background threads.
-#[derive(Debug, Clone)]
-pub enum UserEvent {
-    TerminalEvent,
-}
-
 use alacritty_terminal::grid::Dimensions as TermDimTrait;
 use crate::grid::divider::{
     self, compute_dividers, DividerSet, Orientation, DIVIDER_VISUAL_WIDTH,
@@ -21,6 +15,14 @@ use crate::grid::divider::{
 use crate::grid::layout::GridLayout;
 use crate::grid::operations::{self, SplitDirection};
 use crate::grid::panel::{Panel, PanelId, PanelType};
+
+/// Custom event type for waking winit from background threads.
+#[derive(Debug, Clone)]
+pub enum UserEvent {
+    TerminalEvent,
+    FileChanged(Vec<std::path::PathBuf>),
+    CanvasMessage(PanelId, String),
+}
 use crate::input::keyboard;
 use crate::input::mouse::MouseState;
 use crate::input::{CursorStyle, InputAction};
@@ -592,6 +594,44 @@ impl App {
                     }
                 }
             }
+
+            // === Canvas actions (Phase 3) ===
+            InputAction::CreateCanvas => {
+                // Implemented in Task 2
+            }
+            InputAction::CanvasIpcMessage { panel_id: _, message: _ } => {
+                // Implemented in Task 2
+            }
+
+            // === Markdown actions (Phase 3, Plan 02) ===
+            InputAction::OpenMarkdown { path: _ } => {
+                // Implemented in Plan 02
+            }
+            InputAction::MarkdownScroll { panel_id: _, delta: _ } => {
+                // Implemented in Plan 02
+            }
+            InputAction::MarkdownFileChanged { path: _ } => {
+                // Implemented in Plan 02
+            }
+
+            // === Sidebar actions (Phase 3, Plan 03) ===
+            InputAction::ToggleSidebar => {
+                // Implemented in Plan 03
+            }
+            InputAction::SidebarSelect { path: _ } => {
+                // Implemented in Plan 03
+            }
+            InputAction::SidebarNewCanvas => {
+                // Implemented in Plan 03
+            }
+
+            // === Focus cycling (Phase 3) ===
+            InputAction::FocusNextPanel => {
+                // Implemented in Task 3
+            }
+            InputAction::FocusPrevPanel => {
+                // Implemented in Task 3
+            }
         }
     }
 
@@ -1021,7 +1061,16 @@ impl ApplicationHandler<UserEvent> for App {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: UserEvent) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::TerminalEvent => {}
+            UserEvent::CanvasMessage(panel_id, msg) => {
+                self.process_action(InputAction::CanvasIpcMessage { panel_id, message: msg });
+            }
+            UserEvent::FileChanged(_paths) => {
+                // Handled in Plan 02 (markdown)
+            }
+        }
         if let Some(window) = &self.window {
             window.request_redraw();
         }

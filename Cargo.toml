@@ -30,6 +30,19 @@ copypasta = "0.10.2"
 parking_lot = "0.12"
 regex-syntax = "0.8"
 
+# Webview embedding (Phase 3)
+wry = "0.55"
+
+# File watching (Phase 3)
+notify = "8.2"
+notify-debouncer-full = "0.7"
+
+# Markdown parsing (Phase 3)
+pulldown-cmark = "0.13"
+
+# HTTP response builder (for wry custom protocol)
+http = "1"
+
 # Vertex buffer data
 bytemuck = { version = "1", features = ["derive"] }
 

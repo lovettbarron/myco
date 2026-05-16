@@ -1,6 +1,8 @@
 pub mod keyboard;
 pub mod mouse;
 
+use std::path::PathBuf;
+
 use crate::grid::{Orientation, PanelId};
 
 /// Actions produced by the input system for the app to process.
@@ -66,6 +68,26 @@ pub enum InputAction {
     TerminalSelectionEnd { panel_id: PanelId },
     /// Create new terminal panel (from menu/shortcut).
     CreateTerminal,
+    /// Create a new TLDraw canvas panel.
+    CreateCanvas,
+    /// Handle an IPC message from a canvas webview.
+    CanvasIpcMessage { panel_id: PanelId, message: String },
+    /// Open a markdown file in a markdown panel.
+    OpenMarkdown { path: PathBuf },
+    /// Scroll markdown panel.
+    MarkdownScroll { panel_id: PanelId, delta: f32 },
+    /// Markdown file changed on disk (from watcher).
+    MarkdownFileChanged { path: PathBuf },
+    /// Toggle sidebar visibility.
+    ToggleSidebar,
+    /// Open file from sidebar.
+    SidebarSelect { path: PathBuf },
+    /// Create new canvas from sidebar.
+    SidebarNewCanvas,
+    /// Cycle focus to next panel.
+    FocusNextPanel,
+    /// Cycle focus to previous panel.
+    FocusPrevPanel,
 }
 
 /// Cursor styles for different interaction states.
