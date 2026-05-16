@@ -83,6 +83,11 @@ impl TerminalManager {
         }
     }
 
+    /// Get mutable access to the terminals map.
+    pub fn terminals_mut(&mut self) -> &mut HashMap<PanelId, TerminalState> {
+        &mut self.terminals
+    }
+
     /// Update cursor blink state for all terminals.
     ///
     /// Returns true if any terminal's cursor state changed (needs redraw).

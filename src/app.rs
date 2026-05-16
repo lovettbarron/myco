@@ -350,9 +350,16 @@ impl App {
                 }
             }
 
-            // Stub actions (implemented in Plan 02)
-            InputAction::TerminalScroll { .. }
-            | InputAction::TerminalSearchOpen { .. }
+            InputAction::TerminalScroll { panel_id, delta } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        ts.scroll(delta);
+                    }
+                }
+            }
+
+            // Stub actions (selection, search -- implemented later in this plan)
+            InputAction::TerminalSearchOpen { .. }
             | InputAction::TerminalSearchClose { .. }
             | InputAction::TerminalSearchNext { .. }
             | InputAction::TerminalSearchPrev { .. }
@@ -360,7 +367,7 @@ impl App {
             | InputAction::TerminalSelectionStart { .. }
             | InputAction::TerminalSelectionUpdate { .. }
             | InputAction::TerminalSelectionEnd { .. } => {
-                // Stub: implemented in Plan 02 (scrollback, search, selection)
+                // Stub: implemented in subsequent tasks
             }
         }
     }
@@ -488,6 +495,21 @@ impl App {
                                     ts.cursor_blink_visible,
                                 );
                             quads.extend(term_quads);
+
+                            // "New output" indicator (D-10): show when scrolled up and new output arrived
+                            if ts.has_new_output_while_scrolled {
+                                let indicator_w = 120.0_f32;
+                                let indicator_h = 22.0_f32;
+                                let indicator_x = px + pw / 2.0 - indicator_w / 2.0;
+                                let indicator_y = py_offset + ph - indicator_h - 4.0;
+                                quads.push(QuadInstance {
+                                    position: [indicator_x, indicator_y],
+                                    size: [indicator_w, indicator_h],
+                                    color: [0.2, 0.4, 0.8, 0.7],
+                                    corner_radius: 4.0,
+                                    _padding: 0.0,
+                                });
+                            }
                         }
                     }
                 }
@@ -629,6 +651,22 @@ impl App {
                                         (self.theme.panel_label_text[2] * 255.0) as u8,
                                         (self.theme.panel_label_text[3] * 255.0) as u8,
                                     ),
+                                });
+                            }
+                            // "New output" indicator label (D-10)
+                            if ts.has_new_output_while_scrolled {
+                                let indicator_w = 120.0_f32;
+                                let indicator_h = 22.0_f32;
+                                let indicator_x = px + pw / 2.0 - indicator_w / 2.0;
+                                let indicator_y = py_offset + ph - indicator_h - 4.0;
+                                labels.push(TextLabel {
+                                    text: "New output \u{25BC}".to_string(),
+                                    x: indicator_x + 10.0,
+                                    y: indicator_y + 3.0,
+                                    width: indicator_w - 20.0,
+                                    height: 16.0,
+                                    font_size: 11.0,
+                                    color: glyphon::Color::rgba(240, 240, 240, 255),
                                 });
                             }
                             // Terminal text is rendered via terminal_renderer, not labels
@@ -776,12 +814,18 @@ impl ApplicationHandler for App {
 
             WindowEvent::MouseInput { state, button, .. } => {
                 if let Some(grid) = &self.grid {
+                    let panels = &self.panels;
+                    let panel_types = |pid: PanelId| -> Option<PanelType> {
+                        panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
+                    };
                     let actions = match state {
                         ElementState::Pressed => self.mouse_state.on_mouse_press(
                             button,
                             &self.dividers,
                             grid,
                             TITLE_BAR_HEIGHT,
+                            &panel_types,
+                            &self.modifiers,
                         ),
                         ElementState::Released => self.mouse_state.on_mouse_release(
                             button,
@@ -792,6 +836,30 @@ impl ApplicationHandler for App {
                     let actions: Vec<_> = actions;
                     for action in actions {
                         self.process_action(action);
+                    }
+                }
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => (y * 3.0) as i32,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => (pos.y / 20.0) as i32,
+                };
+                if lines != 0 {
+                    if let Some(grid) = &self.grid {
+                        let panels = &self.panels;
+                        let panel_types = |pid: PanelId| -> Option<PanelType> {
+                            panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
+                        };
+                        let actions = self.mouse_state.on_mouse_wheel(
+                            lines as f32,
+                            grid,
+                            TITLE_BAR_HEIGHT,
+                            &panel_types,
+                        );
+                        for action in actions {
+                            self.process_action(action);
+                        }
                     }
                 }
             }

@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::WindowSize;
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::{Config as TermConfig, Term};
+use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::tty;
 use tracing::{debug, warn};
 
@@ -70,6 +70,16 @@ pub struct TerminalState {
     cursor_blink_last_toggle: Instant,
     /// Whether cursor blinking is enabled (programs can toggle via escape sequences).
     pub cursor_blink_enabled: bool,
+
+    // --- Scrollback state (D-10, D-11, D-12) ---
+    /// Current display offset (how far scrolled back; 0 = at bottom).
+    pub scroll_offset: usize,
+    /// Whether new output arrived while the terminal is scrolled up (for D-10 indicator).
+    pub has_new_output_while_scrolled: bool,
+
+    // --- Copy flash state (D-15) ---
+    /// Start time of the copy flash animation (None = no flash active).
+    pub copy_flash_start: Option<Instant>,
 }
 
 impl TerminalState {
@@ -148,6 +158,9 @@ impl TerminalState {
             cursor_blink_visible: true,
             cursor_blink_last_toggle: Instant::now(),
             cursor_blink_enabled: true, // Per D-08: blink by default
+            scroll_offset: 0,
+            has_new_output_while_scrolled: false,
+            copy_flash_start: None,
         })
     }
 
@@ -156,7 +169,9 @@ impl TerminalState {
     /// Called in the main thread's about_to_wait handler.
     /// Handles terminal events like exit, cursor blink changes, etc.
     pub fn drain_events(&mut self) {
+        let mut had_events = false;
         while let Ok(event) = self.event_rx.try_recv() {
+            had_events = true;
             match event {
                 alacritty_terminal::event::Event::Exit => {
                     debug!("Terminal: Exit event received");
@@ -188,6 +203,10 @@ impl TerminalState {
                     debug!("Terminal: Unhandled event: {:?}", other);
                 }
             }
+        }
+        // Track new output indicator (D-10)
+        if had_events {
+            self.on_new_output();
         }
     }
 
@@ -226,6 +245,79 @@ impl TerminalState {
             .send(Msg::Input(Cow::Owned(bytes.to_vec())))
         {
             warn!("Failed to write to PTY: {}", e);
+        }
+    }
+
+    // --- Scrollback methods (D-10, D-11) ---
+
+    /// Scroll the terminal display by delta lines (positive = scroll up/back in history).
+    ///
+    /// Per D-11: if in ALT_SCREEN mode, send arrow key sequences to the app instead.
+    pub fn scroll(&mut self, delta: i32) {
+        let term = self.term.lock();
+        let mode = *term.mode();
+        drop(term);
+
+        if mode.contains(TermMode::ALT_SCREEN) {
+            // D-11: In alternate screen (vim, htop, less), send arrow keys to the app
+            let key = if delta > 0 { b"\x1b[A" } else { b"\x1b[B" };
+            for _ in 0..delta.unsigned_abs() {
+                self.write_to_pty(key);
+            }
+        } else {
+            let mut term = self.term.lock();
+            term.scroll_display(Scroll::Delta(delta));
+            self.scroll_offset = term.grid().display_offset();
+        }
+    }
+
+    /// Jump to the latest output (scroll to bottom). Clears new output indicator.
+    pub fn scroll_to_bottom(&mut self) {
+        let mut term = self.term.lock();
+        term.scroll_display(Scroll::Bottom);
+        self.scroll_offset = 0;
+        self.has_new_output_while_scrolled = false;
+    }
+
+    /// Called when new PTY output arrives. Updates the new-output indicator per D-10.
+    fn on_new_output(&mut self) {
+        let term = self.term.lock();
+        let offset = term.grid().display_offset();
+        drop(term);
+        if offset > 0 {
+            self.has_new_output_while_scrolled = true;
+        }
+        self.scroll_offset = offset;
+    }
+
+    // --- Copy flash methods (D-15) ---
+
+    /// Trigger copy flash animation (brief highlight ~200ms fade).
+    pub fn trigger_copy_flash(&mut self) {
+        self.copy_flash_start = Some(Instant::now());
+    }
+
+    /// Check if copy flash is active and return opacity (0.0-1.0).
+    /// Returns None if flash has expired (>200ms).
+    pub fn copy_flash_opacity(&self) -> Option<f32> {
+        if let Some(start) = self.copy_flash_start {
+            let elapsed = start.elapsed().as_millis() as f32;
+            if elapsed < 200.0 {
+                Some(1.0 - (elapsed / 200.0))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Clear expired flash state.
+    pub fn clear_expired_flash(&mut self) {
+        if let Some(start) = self.copy_flash_start {
+            if start.elapsed().as_millis() > 200 {
+                self.copy_flash_start = None;
+            }
         }
     }
 }

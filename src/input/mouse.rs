@@ -1,7 +1,10 @@
+use std::time::Instant;
 use winit::event::MouseButton;
+use winit::keyboard::ModifiersState;
 
 use crate::grid::divider::{hit_test_divider, DividerSet};
 use crate::grid::layout::GridLayout;
+use crate::grid::panel::PanelType;
 use crate::grid::{Orientation, PanelId};
 
 use super::{CursorStyle, InputAction};
@@ -36,6 +39,10 @@ pub enum DragState {
         panel_id: PanelId,
         start_pos: (f64, f64),
     },
+    /// Dragging to select text in a terminal panel.
+    DraggingTerminalSelection {
+        panel_id: PanelId,
+    },
 }
 
 /// Mouse input state tracking.
@@ -50,6 +57,12 @@ pub struct MouseState {
     pub hovered_divider: Option<usize>,
     /// ID of the currently hovered panel, if any.
     pub hovered_panel: Option<PanelId>,
+    /// Timestamp of last click for double/triple click detection.
+    pub last_click_time: Instant,
+    /// Position of last click.
+    pub last_click_pos: (f64, f64),
+    /// Click count (1=single, 2=double, 3=triple).
+    pub click_count: u8,
 }
 
 impl Default for MouseState {
@@ -60,6 +73,9 @@ impl Default for MouseState {
             cursor_y: 0.0,
             hovered_divider: None,
             hovered_panel: None,
+            last_click_time: Instant::now(),
+            last_click_pos: (0.0, 0.0),
+            click_count: 0,
         }
     }
 }
@@ -121,6 +137,14 @@ impl MouseState {
             DragState::DraggingTitleBar { .. } => {
                 // While dragging title bar, just update position (swap happens on release)
             }
+            DragState::DraggingTerminalSelection { panel_id } => {
+                let pid = *panel_id;
+                actions.push(InputAction::TerminalSelectionUpdate {
+                    panel_id: pid,
+                    x: x as f32,
+                    y: y as f32,
+                });
+            }
         }
 
         actions
@@ -129,13 +153,15 @@ impl MouseState {
     /// Handle mouse button press.
     ///
     /// Hit-testing order: close/fullscreen buttons first, then dividers,
-    /// then panel title bars, then panel bodies.
+    /// then panel title bars, then panel bodies (including terminal selection).
     pub fn on_mouse_press(
         &mut self,
         button: MouseButton,
         dividers: &DividerSet,
         grid: &GridLayout,
         title_bar_height: f32,
+        panel_types: &dyn Fn(PanelId) -> Option<PanelType>,
+        modifiers: &ModifiersState,
     ) -> Vec<InputAction> {
         let mut actions = Vec::new();
         let x = self.cursor_x;
@@ -143,6 +169,20 @@ impl MouseState {
 
         match button {
             MouseButton::Left => {
+                // Update click counting for double/triple click detection
+                let now = Instant::now();
+                let elapsed = now.duration_since(self.last_click_time);
+                let distance = ((x - self.last_click_pos.0).powi(2)
+                    + (y - self.last_click_pos.1).powi(2))
+                .sqrt();
+                if elapsed < std::time::Duration::from_millis(500) && distance < 5.0 {
+                    self.click_count = (self.click_count % 3) + 1; // cycles 1->2->3->1
+                } else {
+                    self.click_count = 1;
+                }
+                self.last_click_time = now;
+                self.last_click_pos = (x, y);
+
                 // 1. Hit-test close and fullscreen buttons first
                 if let Some(action) =
                     hit_test_buttons(grid, x as f32, y as f32, title_bar_height)
@@ -189,6 +229,18 @@ impl MouseState {
                     find_panel_at(grid, x as f32, y as f32, title_bar_height)
                 {
                     actions.push(InputAction::FocusPanel { panel_id });
+
+                    // 5. Terminal selection handling
+                    if let Some(PanelType::Terminal) = panel_types(panel_id) {
+                        let block = modifiers.alt_key(); // D-14: Option+drag = block selection
+                        actions.push(InputAction::TerminalSelectionStart {
+                            panel_id,
+                            x: x as f32,
+                            y: y as f32,
+                            block,
+                        });
+                        self.drag = DragState::DraggingTerminalSelection { panel_id };
+                    }
                 }
             }
             MouseButton::Right => {
@@ -263,7 +315,42 @@ impl MouseState {
                     }
                 }
             }
+            DragState::DraggingTerminalSelection { panel_id } => {
+                let pid = *panel_id;
+                actions.push(InputAction::TerminalSelectionEnd { panel_id: pid });
+                self.drag = DragState::Idle;
+            }
             DragState::Idle => {}
+        }
+
+        actions
+    }
+
+    /// Handle mouse wheel/scroll events.
+    ///
+    /// Returns InputActions for terminal scrolling when cursor is over a terminal panel.
+    pub fn on_mouse_wheel(
+        &self,
+        delta_lines: f32,
+        grid: &GridLayout,
+        title_bar_height: f32,
+        panel_types: &dyn Fn(PanelId) -> Option<PanelType>,
+    ) -> Vec<InputAction> {
+        let mut actions = Vec::new();
+
+        // Find which panel the cursor is over
+        if let Some(panel_id) =
+            find_panel_at(grid, self.cursor_x as f32, self.cursor_y as f32, title_bar_height)
+        {
+            if let Some(PanelType::Terminal) = panel_types(panel_id) {
+                let lines = delta_lines as i32;
+                if lines != 0 {
+                    actions.push(InputAction::TerminalScroll {
+                        panel_id,
+                        delta: lines,
+                    });
+                }
+            }
         }
 
         actions
