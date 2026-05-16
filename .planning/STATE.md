@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-05-16T11:20:23Z"
-last_activity: 2026-05-16 -- Phase 03 Plan 01 complete (TLDraw canvas cap)
+last_updated: "2026-05-16T11:40:27.836Z"
+last_activity: 2026-05-16 -- Phase 03 Plan 02 complete (GPU markdown viewer + file watcher)
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 9
-  completed_plans: 7
-  percent: 78
+  completed_plans: 8
+  percent: 89
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 ## Current Position
 
 Phase: 03 (webview-caps) — EXECUTING
-Plan: 2 of 3
-Status: Plan 01 complete, Plan 02 next
-Last activity: 2026-05-16 -- Phase 03 Plan 01 complete (TLDraw canvas cap)
+Plan: 3 of 3
+Status: Ready to execute
+Last activity: 2026-05-16
 
-Progress: [███████░░░] 78%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [███████░░░] 78%
 | Phase 02 P01 | 45 min | 3 tasks | 16 files |
 | Phase 02 P02 | 12 min | 3 tasks | 11 files |
 | Phase 03 P01 | 10 min | 3 tasks | 22 files |
+| Phase 03 P02 | 13 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,11 @@ Recent decisions affecting current work:
 - [03-01]: Pending action queue pattern for safe re-entrant action dispatch from IPC shortcuts
 - [03-01]: Assets loaded from filesystem at runtime (include_bytes! for index.html fallback only)
 - [03-01]: TLDraw 5.0.1 store.listen with scope:'document', source:'user' for auto-save debounce
+- [03-02]: Buffer-caching pattern for markdown renderer (same as TerminalRenderer: update_cache + collect_text_areas)
+- [03-02]: Markdown text areas combined with terminal text areas in single vec before text_engine.prepare()
+- [03-02]: pulldown-cmark 0.13.3 TagEnd::BlockQuote takes Option<BlockQuoteKind> (wildcard pattern needed)
+- [03-02]: cosmic-text 0.18 set_rich_text takes &Attrs for default_attrs and Option<Align> 5th param
+- [03-02]: notify-debouncer-full 0.7.0 uses RecommendedCache (not FileIdMap) as Debouncer type param
 
 ### Pending Todos
 
@@ -117,6 +123,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T11:20:23Z
-Stopped at: Completed 03-01-PLAN.md
-Resume file: .planning/phases/03-webview-caps/03-02-PLAN.md
+Last session: 2026-05-16T11:40:27.831Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: .planning/phases/03-webview-caps/03-03-PLAN.md

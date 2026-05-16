@@ -78,7 +78,7 @@ Plans:
 - [x] 03-01-PLAN.md -- TLDraw canvas via wry webview (bundled assets, custom protocol, IPC auto-save, focus routing)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 03-02-PLAN.md -- GPU-rendered markdown viewer with live file updates (pulldown-cmark parser, glyphon rendering, notify watcher)
+- [x] 03-02-PLAN.md -- GPU-rendered markdown viewer with live file updates (pulldown-cmark parser, glyphon rendering, notify watcher)
 
 **Wave 3** *(blocked on Waves 1+2 completion)*
 - [ ] 03-03-PLAN.md -- File sidebar and focus polish (GPU-rendered file tree, click-to-open, panel desaturation, focus cycling)
