@@ -572,6 +572,7 @@ impl App {
     /// Build quad instances for the current frame.
     ///
     /// Accepts pre-computed terminal snapshots to avoid re-snapshotting during text prep.
+    #[tracing::instrument(skip_all, level = "trace")]
     fn build_quads(&self, width: f32, height: f32, snapshots: &HashMap<PanelId, TerminalSnapshot>) -> Vec<QuadInstance> {
         let mut quads = Vec::new();
         let grid = match &self.grid {
@@ -771,6 +772,7 @@ impl App {
     }
 
     /// Build text labels for the current frame.
+    #[tracing::instrument(skip_all, level = "trace")]
     #[allow(clippy::unused_self)]
     fn build_labels(&self, _width: f32, _height: f32) -> Vec<TextLabel> {
         let mut labels = Vec::new();
@@ -1192,6 +1194,7 @@ impl ApplicationHandler<UserEvent> for App {
 
             WindowEvent::RedrawRequested => {
                 if let Some(window) = &self.window {
+                    let _frame_span = tracing::trace_span!("frame").entered();
                     let size = window.inner_size();
                     let vw = size.width as f32;
                     let vh = size.height as f32;
@@ -1199,6 +1202,7 @@ impl ApplicationHandler<UserEvent> for App {
                     // Pre-compute terminal snapshots once per frame (WR-01: avoid double snapshot).
                     // Each snapshot acquires the FairMutex briefly. Reusing it for both
                     // quad building and text preparation ensures visual consistency.
+                    let _snap_span = tracing::trace_span!("snapshot_terminals").entered();
                     let mut snapshots: HashMap<PanelId, TerminalSnapshot> = HashMap::new();
                     if let Some(tm) = &self.terminal_manager {
                         for (&panel_id, ts) in tm.terminals().iter() {
@@ -1211,6 +1215,7 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     }
+                    drop(_snap_span);
 
                     // Build frame data
                     let quads = self.build_quads(vw, vh, &snapshots);
@@ -1227,6 +1232,7 @@ impl ApplicationHandler<UserEvent> for App {
                             if let Some(grid) = &self.grid {
                                 let font_system =
                                     renderer.text_engine_mut().font_system_mut();
+                                let _prep_span = tracing::trace_span!("prepare_terminal_text").entered();
                                 for &(node, panel_id) in grid.panel_nodes() {
                                     if let Some(ts) = tm.get(&panel_id) {
                                         if let Some(snapshot) = snapshots.get(&panel_id) {
@@ -1256,6 +1262,7 @@ impl ApplicationHandler<UserEvent> for App {
                                         }
                                     }
                                 }
+                                drop(_prep_span);
                             }
                         }
 

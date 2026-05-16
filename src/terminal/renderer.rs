@@ -144,6 +144,7 @@ impl TerminalRenderer {
     ///
     /// This is the second step of the snapshot + prepare_buffers two-step API.
     /// No lock is held during this operation.
+    #[tracing::instrument(skip_all, level = "trace")]
     pub fn prepare_buffers(
         &self,
         font_system: &mut FontSystem,
