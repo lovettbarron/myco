@@ -54,14 +54,19 @@ src/
   input/              # Keyboard and mouse routing
   renderer/           # GPU state, quad renderer, text engine
   terminal/           # Terminal cap: PTY, rendering, input, selection, search
-  platform/           # macOS-specific (traffic lights, NSView)
+  canvas/             # TLDraw canvas cap: webview, IPC, auto-save
+  sidebar/            # File tree sidebar with project navigation
+  markdown/           # GPU-rendered markdown viewer cap
+  platform/           # macOS-specific (traffic lights, NSView, context menus)
+resources/
+  tldraw/             # TLDraw webview app (Vite + React)
 ```
 
 Config lives in `.myco` (project) and `~/.myco/` (global). JSON format for AI tool compatibility.
 
 ## Status
 
-Phase 2 complete. Working terminal emulator in a resizable grid. Next: webview caps (TLDraw canvas, Markdown viewer).
+Phase 3 complete. Working caps: terminal (with command history and 256-color), TLDraw canvas (auto-save, file loading), and markdown viewer. File sidebar with context menus. Native macOS menu bar.
 
 ## License
 
