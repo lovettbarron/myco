@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-05-16T00:20:26.303Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-05-16T00:36:22.386Z"
 last_activity: 2026-05-16
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 75
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 ## Current Position
 
 Phase: 01 (window-grid-and-build-pipeline) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-05-16
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [█████░░░░░] 50%
 
 *Updated after each plan completion*
 | Phase 01 P02 | 7 min | 2 tasks | 8 files |
+| Phase 01 P03 | 13 | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [01-02]: wgpu 29.0.3 pipeline API -- bind_group_layouts takes Option, immediate_size replaces push_constant_ranges, multiview_mask replaces multiview
 - [Phase ?]: [01-02]: glyphon 0.11.0 requires Cache object for TextAtlas::new() and Viewport::new()
 - [Phase ?]: [01-02]: cosmic-text 0.19 Buffer::set_text takes 5th alignment parameter (Option<Align>)
+- [Phase ?]: [01-03]: Grid operations use GridLayout helper methods to mutate taffy tree, keeping TaffyTree encapsulated
+- [Phase ?]: [01-03]: PanelSwapDrop carries both source and target IDs in action (avoids reading stale drag state)
 
 ### Pending Todos
 
@@ -91,6 +94,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T00:20:26.297Z
-Stopped at: Completed 01-02-PLAN.md
-Resume file: .planning/phases/01-window-grid-and-build-pipeline/01-03-PLAN.md
+Last session: 2026-05-16T00:36:22.380Z
+Stopped at: Completed 01-03-PLAN.md
+Resume file: .planning/phases/01-window-grid-and-build-pipeline/01-04-PLAN.md

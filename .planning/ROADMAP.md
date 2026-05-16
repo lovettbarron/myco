@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md -- Core scaffold and GPU state (Cargo project, wgpu pipeline, winit window, custom title bar)
 - [x] 01-02-PLAN.md -- Renderers, grid layout, and platform (quad renderer, text renderer, taffy grid, panel model)
-- [ ] 01-03-PLAN.md -- Grid interactions (split, resize, close, swap, fullscreen with input routing)
+- [x] 01-03-PLAN.md -- Grid interactions (split, resize, close, swap, fullscreen with input routing)
 - [ ] 01-04-PLAN.md -- Build pipeline (cargo-packager + rcodesign signing + notarization)
 
 ### Phase 2: Terminal Cap

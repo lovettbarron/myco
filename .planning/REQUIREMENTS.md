@@ -22,11 +22,11 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Grid Layout
 
 - [x] **GRID-01**: User can arrange multiple panels (caps) in a resizable grid within the workspace
-- [ ] **GRID-02**: User can drag panel dividers to resize panels smoothly
-- [ ] **GRID-03**: User can close any panel with a close button or keyboard shortcut
-- [ ] **GRID-04**: User can open new panels (caps) of any available type
-- [ ] **GRID-05**: User can fullscreen any individual panel and return to the grid
-- [ ] **GRID-06**: User can move a panel to a different grid position by dragging its title bar
+- [x] **GRID-02**: User can drag panel dividers to resize panels smoothly
+- [x] **GRID-03**: User can close any panel with a close button or keyboard shortcut
+- [x] **GRID-04**: User can open new panels (caps) of any available type
+- [x] **GRID-05**: User can fullscreen any individual panel and return to the grid
+- [x] **GRID-06**: User can move a panel to a different grid position by dragging its title bar
 
 ### Workspace Caps
 
@@ -136,11 +136,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | GRID-01 | Phase 1 | Complete |
-| GRID-02 | Phase 1 | Pending |
-| GRID-03 | Phase 1 | Pending |
-| GRID-04 | Phase 1 | Pending |
-| GRID-05 | Phase 1 | Pending |
-| GRID-06 | Phase 1 | Pending |
+| GRID-02 | Phase 1 | Complete |
+| GRID-03 | Phase 1 | Complete |
+| GRID-04 | Phase 1 | Complete |
+| GRID-05 | Phase 1 | Complete |
+| GRID-06 | Phase 1 | Complete |
 | DIST-01 | Phase 1 | Pending |
 | DIST-02 | Phase 1 | Pending |
 | TERM-01 | Phase 2 | Pending |
