@@ -1,4 +1,5 @@
 mod app;
+mod grid;
 mod platform;
 mod renderer;
 mod theme;

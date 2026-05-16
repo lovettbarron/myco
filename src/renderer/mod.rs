@@ -1,10 +1,12 @@
 pub mod gpu_state;
+pub mod quad_renderer;
 
 use std::sync::Arc;
 use tracing::warn;
 use winit::window::Window;
 
 use gpu_state::GpuState;
+use quad_renderer::{QuadInstance, QuadRenderer};
 
 /// Represents the outcome of a render attempt.
 #[derive(Debug)]
@@ -19,10 +21,11 @@ pub enum RenderResult {
 
 /// Renderer orchestrates the GPU render pipeline.
 ///
-/// For Plan 01-01, the renderer simply clears the screen with the theme background color.
-/// QuadRenderer and TextEngine integration will be added by Plan 01-02.
+/// Manages the quad renderer for instanced rectangle drawing.
+/// TextEngine integration will be added in Task 2 of Plan 01-02.
 pub struct Renderer {
     gpu_state: GpuState,
+    quad_renderer: QuadRenderer,
 }
 
 impl Renderer {
@@ -32,7 +35,11 @@ impl Renderer {
     /// This must NOT be called inside the render loop.
     pub fn new(window: Arc<Window>) -> Self {
         let gpu_state = pollster::block_on(GpuState::new(window));
-        Self { gpu_state }
+        let quad_renderer = QuadRenderer::new(gpu_state.device(), gpu_state.format());
+        Self {
+            gpu_state,
+            quad_renderer,
+        }
     }
 
     /// Handle window resize by reconfiguring the GPU surface.
@@ -40,13 +47,26 @@ impl Renderer {
         self.gpu_state.resize(width, height);
     }
 
-    /// Render a frame with the given clear color.
+    /// Render a frame with the given clear color, quads, and viewport dimensions.
     ///
-    /// For Plan 01-01, this only clears the screen with `clear_color`.
-    /// Plan 01-02 will add quad rendering and text rendering passes.
-    ///
+    /// Quads are rendered in a single render pass on top of the clear color.
     /// Uses wgpu 29's `CurrentSurfaceTexture` enum (not the old `Result<_, SurfaceError>`).
-    pub fn render(&mut self, clear_color: [f32; 4]) -> RenderResult {
+    pub fn render(
+        &mut self,
+        clear_color: [f32; 4],
+        quads: &[QuadInstance],
+        viewport_width: f32,
+        viewport_height: f32,
+    ) -> RenderResult {
+        // Prepare quad data
+        self.quad_renderer.prepare(
+            self.gpu_state.device(),
+            self.gpu_state.queue(),
+            quads,
+            viewport_width,
+            viewport_height,
+        );
+
         let surface_texture = self.gpu_state.surface().get_current_texture();
 
         let output = match surface_texture {
@@ -89,7 +109,7 @@ impl Renderer {
                 });
 
         {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -108,8 +128,9 @@ impl Renderer {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            // Plan 01-02: quad_renderer.render(&mut pass);
-            // Plan 01-02: text_engine.render(&mut pass);
+            // Draw quads (panel backgrounds, title bar, etc.)
+            self.quad_renderer.render(&mut pass);
+            // Task 2: text_engine.render(&mut pass);
         }
 
         self.gpu_state

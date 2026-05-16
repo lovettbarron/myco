@@ -91,8 +91,13 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::RedrawRequested => {
-                if let Some(renderer) = &mut self.renderer {
-                    match renderer.render(self.theme.background) {
+                if let (Some(renderer), Some(window)) =
+                    (&mut self.renderer, &self.window)
+                {
+                    let size = window.inner_size();
+                    let vw = size.width as f32;
+                    let vh = size.height as f32;
+                    match renderer.render(self.theme.background, &[], vw, vh) {
                         crate::renderer::RenderResult::Ok => {}
                         crate::renderer::RenderResult::SkipFrame => {}
                         crate::renderer::RenderResult::SurfaceLost => {
