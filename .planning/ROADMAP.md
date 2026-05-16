@@ -54,7 +54,10 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
+**Wave 1**
 - [ ] 02-01-PLAN.md -- Working terminal core (PTY lifecycle, GPU character rendering, keyboard input, cursor)
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 02-02-PLAN.md -- Terminal interaction (scrollback, selection, clipboard, search overlay, font config)
 
 ### Phase 3: Webview Caps
