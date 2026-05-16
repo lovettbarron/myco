@@ -9,13 +9,12 @@ pub mod input;
 pub mod renderer;
 pub mod state;
 
-pub use event_listener::MycoEventListener;
 pub use state::TerminalState;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::grid::PanelId;
 
