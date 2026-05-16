@@ -38,6 +38,54 @@ const TITLE_BAR_HEIGHT: f32 = 38.0;
 /// Height of the panel title bar area in pixels.
 const PANEL_TITLE_HEIGHT: f32 = 28.0;
 
+/// Accumulates per-frame performance metrics (frame stats) for periodic logging.
+///
+/// Records frame timing, quad count, and terminal cell count.
+/// Logs a summary at `debug!` level every 60 frames, then resets.
+/// Activate with `RUST_LOG=myco=debug`.
+struct FrameStats {
+    frame_count: u64,
+    frame_time_sum: Duration,
+    frame_time_max: Duration,
+    quad_count_sum: u64,
+    cell_count_sum: u64,
+}
+
+impl FrameStats {
+    fn new() -> Self {
+        Self {
+            frame_count: 0,
+            frame_time_sum: Duration::ZERO,
+            frame_time_max: Duration::ZERO,
+            quad_count_sum: 0,
+            cell_count_sum: 0,
+        }
+    }
+
+    fn record(&mut self, frame_time: Duration, quad_count: usize, cell_count: usize) {
+        self.frame_count += 1;
+        self.frame_time_sum += frame_time;
+        self.frame_time_max = self.frame_time_max.max(frame_time);
+        self.quad_count_sum += quad_count as u64;
+        self.cell_count_sum += cell_count as u64;
+    }
+
+    fn log_and_reset(&mut self) {
+        if self.frame_count == 0 {
+            return;
+        }
+        let avg = self.frame_time_sum / self.frame_count as u32;
+        debug!(
+            avg_ms = format!("{:.2}", avg.as_secs_f64() * 1000.0),
+            max_ms = format!("{:.2}", self.frame_time_max.as_secs_f64() * 1000.0),
+            avg_quads = self.quad_count_sum / self.frame_count,
+            avg_cells = self.cell_count_sum / self.frame_count,
+            "frame stats (60 frames)"
+        );
+        *self = Self::new();
+    }
+}
+
 /// Main application state.
 ///
 /// Owns the window, renderer, grid layout, panels, theme, input state,
@@ -60,6 +108,8 @@ pub struct App {
     proxy: Option<EventLoopProxy<UserEvent>>,
     /// Whether a redraw has been requested for the current frame.
     redraw_pending: bool,
+    /// Per-frame performance stats, logged every 60 frames at debug level.
+    frame_stats: FrameStats,
 }
 
 impl App {
@@ -80,6 +130,7 @@ impl App {
             terminal_renderer: TerminalRenderer::new(),
             proxy: Some(proxy),
             redraw_pending: false,
+            frame_stats: FrameStats::new(),
         }
     }
 }
@@ -1195,6 +1246,7 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => {
                 if let Some(window) = &self.window {
                     let _frame_span = tracing::trace_span!("frame").entered();
+                    let frame_start = Instant::now();
                     let size = window.inner_size();
                     let vw = size.width as f32;
                     let vh = size.height as f32;
@@ -1216,6 +1268,7 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                     drop(_snap_span);
+                    let cell_count: usize = snapshots.values().map(|s| s.cols * s.rows.len()).sum();
 
                     // Build frame data
                     let quads = self.build_quads(vw, vh, &snapshots);
@@ -1287,6 +1340,11 @@ impl ApplicationHandler<UserEvent> for App {
                                 );
                             }
                         }
+                    }
+
+                    self.frame_stats.record(frame_start.elapsed(), quads.len(), cell_count);
+                    if self.frame_stats.frame_count >= 60 {
+                        self.frame_stats.log_and_reset();
                     }
                 }
             }
