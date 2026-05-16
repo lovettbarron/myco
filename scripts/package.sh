@@ -17,12 +17,28 @@ if [ -z "$APP_PATH" ]; then
 fi
 
 echo "=== Signing .app with hardened runtime ==="
-# Try keychain-based signing first (preferred on local macOS)
-# If this fails, user needs to export certificate to PEM and use --pem-source
+# Resolve the Developer ID Application signing certificate fingerprint from the keychain.
+# The SHA-256 fingerprint is used to select the correct certificate for signing.
+# To find your fingerprint: security find-certificate -a -c "Developer ID Application" -Z ~/Library/Keychains/login.keychain-db
+CERT_FINGERPRINT="${CODESIGN_FINGERPRINT:-}"
+if [ -z "$CERT_FINGERPRINT" ]; then
+    # Auto-detect: find the Developer ID Application certificate SHA-256 fingerprint
+    CERT_FINGERPRINT=$(security find-certificate -a -c "Developer ID Application" -Z ~/Library/Keychains/login.keychain-db 2>/dev/null \
+        | grep -B1 "Developer ID Application" | grep "SHA-256" | tail -1 | awk '{print $NF}')
+fi
+
+if [ -z "$CERT_FINGERPRINT" ]; then
+    echo "ERROR: No Developer ID Application certificate found in keychain."
+    echo "Install your certificate or set CODESIGN_FINGERPRINT env var."
+    exit 1
+fi
+
+echo "Using certificate fingerprint: $CERT_FINGERPRINT"
+
 rcodesign sign \
     --for-notarization \
-    --entitlements-xml-path build/entitlements.plist \
-    --keychain-domain user \
+    --entitlements-xml-file build/entitlements.plist \
+    --keychain-fingerprint "$CERT_FINGERPRINT" \
     --code-signature-flags runtime \
     "$APP_PATH"
 
@@ -34,7 +50,7 @@ if [ -n "$DMG_PATH" ]; then
     echo "=== Signing DMG ==="
     rcodesign sign \
         --for-notarization \
-        --keychain-domain user \
+        --keychain-fingerprint "$CERT_FINGERPRINT" \
         "$DMG_PATH"
 
     echo "=== Notarizing DMG ==="
