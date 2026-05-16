@@ -80,6 +80,10 @@ pub struct TerminalState {
     // --- Copy flash state (D-15) ---
     /// Start time of the copy flash animation (None = no flash active).
     pub copy_flash_start: Option<Instant>,
+
+    // --- Search state (D-09) ---
+    /// Search overlay state machine.
+    pub search: crate::terminal::search::SearchState,
 }
 
 impl TerminalState {
@@ -161,6 +165,7 @@ impl TerminalState {
             scroll_offset: 0,
             has_new_output_while_scrolled: false,
             copy_flash_start: None,
+            search: crate::terminal::search::SearchState::new(),
         })
     }
 

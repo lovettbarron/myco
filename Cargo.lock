@@ -1071,6 +1071,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "pollster",
+ "regex-syntax",
  "serde",
  "serde_json",
  "taffy",

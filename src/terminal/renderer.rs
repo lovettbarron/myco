@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::Point;
+use alacritty_terminal::index::{Line, Point};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::Term;
@@ -488,5 +488,72 @@ impl TerminalRenderer {
         }
 
         quads
+    }
+
+    /// Build quads for search match highlights (per Pitfall 7: account for display_offset).
+    pub fn build_search_quads(
+        &self,
+        matches: &[crate::terminal::search::SearchMatch],
+        current_match_idx: usize,
+        viewport_x: f32,
+        viewport_y: f32,
+        cell_width: f32,
+        cell_height: f32,
+        display_offset: usize,
+        screen_lines: usize,
+    ) -> Vec<QuadInstance> {
+        let mut quads = Vec::new();
+
+        for (idx, m) in matches.iter().enumerate() {
+            // Convert grid coordinates to screen coordinates
+            // (Pitfall 7: subtract display_offset to get visible position)
+            let screen_line = m.start.line.0 as i32 + display_offset as i32;
+            if screen_line < 0 || screen_line >= screen_lines as i32 {
+                continue; // Not visible
+            }
+
+            let start_col = m.start.column.0 as f32;
+            let end_col = m.end.column.0 as f32 + 1.0;
+
+            let is_current = idx == current_match_idx;
+            let color = if is_current {
+                [0.9, 0.7, 0.2, 0.5] // Bright yellow for current match
+            } else {
+                [0.7, 0.5, 0.1, 0.3] // Dimmer yellow for other matches
+            };
+
+            quads.push(QuadInstance {
+                position: [
+                    viewport_x + start_col * cell_width,
+                    viewport_y + screen_line as f32 * cell_height,
+                ],
+                size: [(end_col - start_col) * cell_width, cell_height],
+                color,
+                corner_radius: 1.0,
+                _padding: 0.0,
+            });
+        }
+
+        quads
+    }
+
+    /// Build quads for the search overlay bar (D-09: top-right of panel).
+    pub fn build_search_bar_quads(
+        &self,
+        viewport_x: f32,
+        viewport_y: f32,
+        viewport_w: f32,
+    ) -> Vec<QuadInstance> {
+        let bar_width = 250.0_f32.min(viewport_w - 20.0);
+        let bar_x = viewport_x + viewport_w - bar_width - 10.0;
+        let bar_y = viewport_y + 5.0;
+
+        vec![QuadInstance {
+            position: [bar_x, bar_y],
+            size: [bar_width, 28.0],
+            color: [0.2, 0.2, 0.25, 0.95], // Dark semi-transparent background
+            corner_radius: 4.0,
+            _padding: 0.0,
+        }]
     }
 }

@@ -6,6 +6,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, Window, WindowId};
 
+use alacritty_terminal::grid::Dimensions as TermDimTrait;
 use crate::grid::divider::{
     self, compute_dividers, DividerSet, Orientation, DIVIDER_VISUAL_WIDTH,
 };
@@ -448,13 +449,73 @@ impl App {
                 }
             }
 
-            // Stub actions (search -- implemented in Task 3)
-            InputAction::TerminalSearchOpen { .. }
-            | InputAction::TerminalSearchClose { .. }
-            | InputAction::TerminalSearchNext { .. }
-            | InputAction::TerminalSearchPrev { .. }
-            | InputAction::TerminalSearchUpdate { .. } => {
-                // Stub: implemented in Task 3
+            InputAction::TerminalSearchOpen { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        ts.search.open();
+                    }
+                }
+            }
+            InputAction::TerminalSearchClose { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        ts.search.close();
+                    }
+                }
+            }
+            InputAction::TerminalSearchChar { panel_id, ch } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        if let crate::terminal::search::SearchState::Open {
+                            query, ..
+                        } = &ts.search
+                        {
+                            let mut new_query = query.clone();
+                            new_query.push(ch);
+                            let mut term = ts.term.lock();
+                            ts.search.update_query(&mut term, &new_query);
+                        }
+                    }
+                }
+            }
+            InputAction::TerminalSearchBackspace { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        if let crate::terminal::search::SearchState::Open {
+                            query, ..
+                        } = &ts.search
+                        {
+                            let mut new_query = query.clone();
+                            new_query.pop();
+                            let mut term = ts.term.lock();
+                            ts.search.update_query(&mut term, &new_query);
+                        }
+                    }
+                }
+            }
+            InputAction::TerminalSearchNext { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        let mut term = ts.term.lock();
+                        ts.search.next_match(&mut term);
+                    }
+                }
+            }
+            InputAction::TerminalSearchPrev { panel_id } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        let mut term = ts.term.lock();
+                        ts.search.prev_match(&mut term);
+                    }
+                }
+            }
+            InputAction::TerminalSearchUpdate { panel_id, query } => {
+                if let Some(tm) = &mut self.terminal_manager {
+                    if let Some(ts) = tm.get_mut(&panel_id) {
+                        let mut term = ts.term.lock();
+                        ts.search.update_query(&mut term, &query);
+                    }
+                }
             }
         }
     }
@@ -612,6 +673,40 @@ impl App {
                                     corner_radius: 4.0,
                                     _padding: 0.0,
                                 });
+                            }
+
+                            // Search overlay quads (D-09)
+                            if ts.search.is_open() {
+                                // Search bar background
+                                let bar_quads = self
+                                    .terminal_renderer
+                                    .build_search_bar_quads(
+                                        px,
+                                        content_y,
+                                        pw,
+                                    );
+                                quads.extend(bar_quads);
+
+                                // Search match highlights
+                                let term = ts.term.lock();
+                                let display_offset =
+                                    term.grid().display_offset();
+                                let screen_lines = term.screen_lines();
+                                drop(term);
+
+                                let search_quads = self
+                                    .terminal_renderer
+                                    .build_search_quads(
+                                        ts.search.match_positions(),
+                                        ts.search.current_match_index(),
+                                        px,
+                                        content_y,
+                                        ts.cell_width,
+                                        ts.cell_height,
+                                        display_offset,
+                                        screen_lines,
+                                    );
+                                quads.extend(search_quads);
                             }
                         }
                     }
@@ -771,6 +866,47 @@ impl App {
                                     font_size: 11.0,
                                     color: glyphon::Color::rgba(240, 240, 240, 255),
                                 });
+                            }
+                            // Search overlay labels (D-09)
+                            if ts.search.is_open() {
+                                let content_y =
+                                    py_offset + PANEL_TITLE_HEIGHT;
+                                let bar_width = 250.0_f32.min(pw - 20.0);
+                                let bar_x = px + pw - bar_width - 10.0;
+                                let bar_y = content_y + 5.0;
+
+                                // Search query text
+                                let query_text = if ts.search.query().is_empty() {
+                                    "Search...".to_string()
+                                } else {
+                                    ts.search.query().to_string()
+                                };
+                                labels.push(TextLabel {
+                                    text: query_text,
+                                    x: bar_x + 8.0,
+                                    y: bar_y + 6.0,
+                                    width: bar_width - 80.0,
+                                    height: 16.0,
+                                    font_size: 12.0,
+                                    color: glyphon::Color::rgba(220, 220, 220, 255),
+                                });
+
+                                // Match count "N of M"
+                                if let Some((current, total)) =
+                                    ts.search.match_info()
+                                {
+                                    labels.push(TextLabel {
+                                        text: format!("{} of {}", current, total),
+                                        x: bar_x + bar_width - 70.0,
+                                        y: bar_y + 6.0,
+                                        width: 60.0,
+                                        height: 16.0,
+                                        font_size: 11.0,
+                                        color: glyphon::Color::rgba(
+                                            160, 160, 160, 255,
+                                        ),
+                                    });
+                                }
                             }
                             // Terminal text is rendered via terminal_renderer, not labels
                         }
@@ -969,11 +1105,21 @@ impl ApplicationHandler for App {
 
             WindowEvent::KeyboardInput { event, .. } => {
                 let panel_type = self.focused_panel_type();
+                let search_open = self
+                    .focused_panel
+                    .and_then(|pid| {
+                        self.terminal_manager
+                            .as_ref()?
+                            .get(&pid)
+                            .map(|ts| ts.search.is_open())
+                    })
+                    .unwrap_or(false);
                 if let Some(action) = keyboard::handle_key_event(
                     &event,
                     &self.modifiers,
                     self.focused_panel,
                     panel_type,
+                    search_open,
                 ) {
                     self.process_action(action);
                 }

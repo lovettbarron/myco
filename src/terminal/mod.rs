@@ -7,6 +7,7 @@ pub mod colors;
 pub mod event_listener;
 pub mod input;
 pub mod renderer;
+pub mod search;
 pub mod selection;
 pub mod state;
 

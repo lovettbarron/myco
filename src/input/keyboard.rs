@@ -21,6 +21,7 @@ pub fn handle_key_event(
     modifiers: &ModifiersState,
     focused_panel: Option<PanelId>,
     panel_type: Option<PanelType>,
+    search_open: bool,
 ) -> Option<InputAction> {
     // Only respond to key presses, not releases
     // (winit fires Pressed for both initial press and repeat)
@@ -29,6 +30,11 @@ pub fn handle_key_event(
     }
 
     let panel_id = focused_panel?;
+
+    // When search is open in a terminal, route keys to the search overlay
+    if search_open && panel_type == Some(PanelType::Terminal) {
+        return handle_search_key(event, modifiers, panel_id);
+    }
 
     // Terminal-focused key routing
     if panel_type == Some(PanelType::Terminal) {
@@ -93,6 +99,46 @@ fn handle_terminal_key(
     }
 
     None
+}
+
+/// Handle keys when the search overlay is open in a terminal panel.
+///
+/// Routes typing to the search query, Enter/Shift+Enter for navigation,
+/// Escape to close, and Cmd+F to toggle.
+fn handle_search_key(
+    event: &KeyEvent,
+    modifiers: &ModifiersState,
+    panel_id: PanelId,
+) -> Option<InputAction> {
+    match &event.logical_key {
+        Key::Named(NamedKey::Escape) => {
+            Some(InputAction::TerminalSearchClose { panel_id })
+        }
+        Key::Named(NamedKey::Enter) => {
+            if modifiers.shift_key() {
+                Some(InputAction::TerminalSearchPrev { panel_id })
+            } else {
+                Some(InputAction::TerminalSearchNext { panel_id })
+            }
+        }
+        Key::Named(NamedKey::Backspace) => {
+            Some(InputAction::TerminalSearchBackspace { panel_id })
+        }
+        Key::Character(c) if modifiers.super_key() && c.as_str() == "f" => {
+            // Cmd+F while search is open -> close search
+            Some(InputAction::TerminalSearchClose { panel_id })
+        }
+        Key::Character(c)
+            if !modifiers.super_key() && !modifiers.control_key() && !modifiers.alt_key() =>
+        {
+            if let Some(ch) = c.chars().next() {
+                Some(InputAction::TerminalSearchChar { panel_id, ch })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Handle keys when a non-terminal panel is focused.

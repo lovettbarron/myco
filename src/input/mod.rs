@@ -54,6 +54,10 @@ pub enum InputAction {
     TerminalSearchPrev { panel_id: PanelId },
     /// Update search query text.
     TerminalSearchUpdate { panel_id: PanelId, query: String },
+    /// Character typed into search box.
+    TerminalSearchChar { panel_id: PanelId, ch: char },
+    /// Backspace in search box.
+    TerminalSearchBackspace { panel_id: PanelId },
     /// Start text selection at a grid point.
     TerminalSelectionStart { panel_id: PanelId, x: f32, y: f32, block: bool },
     /// Update selection endpoint.

@@ -27,6 +27,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 alacritty_terminal = "0.26.0"
 copypasta = "0.10.2"
 parking_lot = "0.12"
+regex-syntax = "0.8"
 
 # Vertex buffer data
 bytemuck = { version = "1", features = ["derive"] }
