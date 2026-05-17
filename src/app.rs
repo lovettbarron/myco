@@ -28,6 +28,7 @@ pub enum UserEvent {
 use crate::input::keyboard;
 use crate::input::mouse::MouseState;
 use crate::input::{CursorStyle, InputAction};
+use crate::shortcuts::{ChordStateMachine, ShortcutRegistry};
 use crate::renderer::quad_renderer::QuadInstance;
 use crate::renderer::text_renderer::TextLabel;
 use crate::renderer::Renderer;
@@ -217,6 +218,10 @@ pub struct App {
     settings: SettingsState,
     /// Auto-save state for debounced config persistence (D-07, D-08).
     auto_save: crate::config::AutoSaveState,
+    /// Shortcut registry mapping key combos to action IDs (D-02, D-14, D-18).
+    shortcut_registry: ShortcutRegistry,
+    /// Chord state machine for multi-key shortcut sequences (D-15).
+    chord_state: ChordStateMachine,
 }
 
 impl App {
@@ -258,6 +263,8 @@ impl App {
             bottom_bar: None,
             settings: SettingsState::new(),
             auto_save: crate::config::AutoSaveState::new(),
+            shortcut_registry: ShortcutRegistry::new(),
+            chord_state: ChordStateMachine::new(),
         }
     }
 }
@@ -2833,6 +2840,8 @@ impl ApplicationHandler<UserEvent> for App {
                     history_search_open,
                     has_ghost_text,
                     term_mode,
+                    &self.shortcut_registry,
+                    &mut self.chord_state,
                 );
                 for action in actions {
                     self.process_action(action);
@@ -3123,6 +3132,9 @@ impl ApplicationHandler<UserEvent> for App {
                 window.request_redraw();
             }
         }
+
+        // Reset stale chord state (D-15: 500ms timeout between chord keys)
+        self.chord_state.check_timeout();
 
         // Auto-save config if dirty and debounce elapsed (D-07, D-08)
         if self.auto_save.should_save() {

@@ -3,19 +3,16 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::grid::panel::PanelType;
 use crate::grid::PanelId;
+use crate::shortcuts::chord::{ChordStateMachine, ResolveResult};
+use crate::shortcuts::ShortcutRegistry;
 
 use super::InputAction;
 
 /// Handle keyboard events and produce input actions.
 ///
-/// Shortcuts (global):
-/// - Cmd+D: split horizontal
-/// - Cmd+Shift+D: split vertical
-/// - Cmd+W: close panel
-/// - Cmd+T: create new terminal
-///
+/// Shortcuts are resolved via the ShortcutRegistry (data-driven, configurable).
 /// When a terminal panel is focused, most keys are routed to the PTY
-/// via terminal::input::translate_key(). Only Cmd-shortcuts are intercepted.
+/// via terminal::input::translate_key(). Only registry-matched shortcuts are intercepted.
 pub fn handle_key_event(
     event: &KeyEvent,
     modifiers: &ModifiersState,
@@ -25,6 +22,8 @@ pub fn handle_key_event(
     history_search_open: bool,
     has_ghost_text: bool,
     term_mode: alacritty_terminal::term::TermMode,
+    registry: &ShortcutRegistry,
+    chord_state: &mut ChordStateMachine,
 ) -> Vec<InputAction> {
     if event.state != ElementState::Pressed {
         return Vec::new();
@@ -49,25 +48,56 @@ pub fn handle_key_event(
             .collect();
     }
 
-    // Canvas-focused key routing: only intercept Cmd-shortcuts
+    // Canvas-focused key routing: only intercept registry shortcuts
     if panel_type == Some(PanelType::Canvas) {
-        if modifiers.super_key() {
-            return handle_generic_key(event, modifiers, panel_id)
-                .into_iter()
-                .collect();
-        }
-        return Vec::new();
+        return resolve_via_registry(event, modifiers, panel_id, registry, chord_state);
     }
 
     // Terminal-focused key routing
     if panel_type == Some(PanelType::Terminal) {
-        return handle_terminal_key(event, modifiers, panel_id, term_mode, has_ghost_text);
+        return handle_terminal_key(
+            event,
+            modifiers,
+            panel_id,
+            term_mode,
+            has_ghost_text,
+            registry,
+            chord_state,
+        );
     }
 
     // Non-terminal panel key routing
-    handle_generic_key(event, modifiers, panel_id)
-        .into_iter()
-        .collect()
+    handle_generic_key(event, modifiers, panel_id, registry, chord_state)
+}
+
+/// Try to resolve a key event through the shortcut registry.
+///
+/// Returns a vec with the resolved action, or empty if no match.
+fn resolve_via_registry(
+    event: &KeyEvent,
+    modifiers: &ModifiersState,
+    panel_id: PanelId,
+    registry: &ShortcutRegistry,
+    chord_state: &mut ChordStateMachine,
+) -> Vec<InputAction> {
+    if let Some(combo) = crate::shortcuts::chord::key_combo_from_event(event, modifiers) {
+        // Check chord timeout first
+        chord_state.check_timeout();
+
+        let result = chord_state.feed(&combo, registry);
+        match result {
+            ResolveResult::Action(action_id) => {
+                if let Some(action) = crate::input::action_from_id(&action_id, panel_id) {
+                    return vec![action];
+                }
+                return Vec::new();
+            }
+            ResolveResult::Pending => return Vec::new(), // Swallow key while waiting for chord
+            ResolveResult::NoMatch => {}                 // Fall through
+            ResolveResult::Timeout => {}                 // Fall through
+        }
+    }
+    Vec::new()
 }
 
 /// Handle keys when a terminal panel is focused.
@@ -79,39 +109,17 @@ fn handle_terminal_key(
     panel_id: PanelId,
     mode: alacritty_terminal::term::TermMode,
     has_ghost_text: bool,
+    registry: &ShortcutRegistry,
+    chord_state: &mut ChordStateMachine,
 ) -> Vec<InputAction> {
-    // Cmd+key shortcuts (intercepted, not sent to PTY)
-    if modifiers.super_key() {
-        let action = match &event.logical_key {
-            Key::Character(c) => match c.as_str() {
-                "d" => Some(InputAction::PanelSplitHorizontal { panel_id }),
-                "D" => Some(InputAction::PanelSplitVertical { panel_id }),
-                "w" => Some(InputAction::PanelClose { panel_id }),
-                "t" => Some(InputAction::CreateTerminal),
-                "T" => Some(InputAction::CreateCanvas),
-                "b" => Some(InputAction::ToggleSidebar),
-                "]" => Some(InputAction::FocusNextPanel),
-                "[" => Some(InputAction::FocusPrevPanel),
-                "c" => Some(InputAction::TerminalCopy { panel_id }),
-                "v" => Some(InputAction::TerminalPaste { panel_id }),
-                "f" => Some(InputAction::TerminalSearchOpen { panel_id }),
-                "," => Some(InputAction::OpenSettings),
-                "+" | "=" => Some(InputAction::TerminalFontSizeChange {
-                    panel_id,
-                    delta: 1.0,
-                }),
-                "-" => Some(InputAction::TerminalFontSizeChange {
-                    panel_id,
-                    delta: -1.0,
-                }),
-                _ => None,
-            },
-            _ => None,
-        };
-        return action.into_iter().collect();
+    // Check shortcut registry first (replaces hardcoded Cmd+key matching)
+    let registry_result =
+        resolve_via_registry(event, modifiers, panel_id, registry, chord_state);
+    if !registry_result.is_empty() {
+        return registry_result;
     }
 
-    // Ctrl+R: open history search
+    // Ctrl+R: open history search (not rebindable -- readline convention)
     if modifiers.control_key() {
         if let Key::Character(c) = &event.logical_key {
             if c.as_str() == "r" {
@@ -200,21 +208,14 @@ fn handle_generic_key(
     event: &KeyEvent,
     modifiers: &ModifiersState,
     panel_id: PanelId,
-) -> Option<InputAction> {
-    match &event.logical_key {
-        Key::Named(NamedKey::Escape) => Some(InputAction::PanelToggleFullscreen { panel_id }),
-        Key::Character(c) if modifiers.super_key() => match c.as_str() {
-            "d" => Some(InputAction::PanelSplitHorizontal { panel_id }),
-            "D" => Some(InputAction::PanelSplitVertical { panel_id }),
-            "w" => Some(InputAction::PanelClose { panel_id }),
-            "t" => Some(InputAction::CreateTerminal),
-            "T" => Some(InputAction::CreateCanvas),
-            "b" => Some(InputAction::ToggleSidebar),
-            "," => Some(InputAction::OpenSettings),
-            "]" => Some(InputAction::FocusNextPanel),
-            "[" => Some(InputAction::FocusPrevPanel),
-            _ => None,
-        },
-        _ => None,
+    registry: &ShortcutRegistry,
+    chord_state: &mut ChordStateMachine,
+) -> Vec<InputAction> {
+    // Escape: toggle fullscreen (contextual, not rebindable via registry)
+    if let Key::Named(NamedKey::Escape) = &event.logical_key {
+        return vec![InputAction::PanelToggleFullscreen { panel_id }];
     }
+
+    // Check shortcut registry for all other keys
+    resolve_via_registry(event, modifiers, panel_id, registry, chord_state)
 }
