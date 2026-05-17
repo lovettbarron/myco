@@ -582,22 +582,20 @@ pub fn show_panel_context_menu(
 
 **Resolution for A1:** VERIFIED by reading alacritty_terminal-0.26.0/src/tty/unix.rs lines 109-113: `pub fn child(&self) -> &Child { &self.child }`. This is confirmed public. Risk eliminated.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Process group behavior on macOS with `/usr/bin/login` shell spawning**
    - What we know: alacritty_terminal uses `/usr/bin/login` on macOS (tty/unix.rs line 171-191) which spawns the shell. The pre_exec calls `setsid()` creating a new session.
    - What's unclear: Whether `getpgid(child_pid)` returns the login process or the shell. The `setsid()` call in pre_exec should make the child the session leader and process group leader.
-   - Recommendation: Test empirically. If `getpgid` doesn't work as expected, fall back to `kill(child_pid, SIGSTOP)` for the direct child only (covers 90% of cases).
+   - **RESOLVED:** Use `getpgid(child_pid)` as primary approach since `setsid()` guarantees the child is process group leader. Fall back to `kill(child_pid, SIGSTOP)` for the direct child only if `getpgid` returns -1 (error). Test empirically during execution; the fallback covers the failure case gracefully.
 
 2. **Regex crate dependency for pattern matching**
    - What we know: The project uses `regex-syntax` (for terminal search escaping) but not the full `regex` crate.
-   - What's unclear: Whether simple string contains (`.contains()`) is sufficient for Claude Code patterns, or if full regex is needed.
-   - Recommendation: Start with simple substring matching for v1 built-in patterns. Add `regex` only if users request complex patterns in `patterns.json`. The matchers field is defined as strings; interpret as literal substrings first, regex if prefixed with `^` or containing unescaped metacharacters.
+   - **RESOLVED:** Use plain substring matching (`.contains()`) for v1. All built-in matchers are literal strings: `"Do you want to proceed?"`, `"[sudo] password for"`, `"Allow?"`, `"Yes/No"`. No regex escaping needed — matchers are plain text that appears verbatim in terminal output. The `patterns.json` field `matchers` is an array of literal substrings. Regex support deferred to post-v1 if users request it.
 
 3. **Toast rendering Z-order with settings overlay**
    - What we know: Settings overlay renders on top of everything. Toasts currently render as part of settings.
-   - What's unclear: When settings is closed, where do intervention toasts render in the quad stack?
-   - Recommendation: Toast quads are appended after all panel content and dividers, but before settings overlay. The toast manager is a top-level struct in App, not embedded in SettingsState.
+   - **RESOLVED:** Toast quads are appended after all panel content and dividers, but before settings overlay. The toast manager is a top-level struct in App, not embedded in SettingsState. When settings is open, its overlay renders last (highest Z). When settings is closed, toasts are the highest-Z content.
 
 ## Environment Availability
 
