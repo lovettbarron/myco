@@ -20,3 +20,4 @@
 
 # Proptest regression files
 proptest-regressions/
+*.proptest-regressions
