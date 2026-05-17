@@ -35,7 +35,7 @@ Declared values (must be multiples of 4). Derived from existing codebase constan
 | sm | 8px | Panel content padding (PANEL_CONTENT_PADDING), toast stack gap, text insets |
 | md | 16px | Toast margin from viewport edge, tooltip padding, context menu item height |
 | lg | 24px | Stats bar height (STATS_BAR_HEIGHT), bottom bar height (BOTTOM_BAR_HEIGHT) |
-| xl | 28px | Panel title bar height (PANEL_TITLE_HEIGHT) |
+| xl | 28px | Panel title bar height (PANEL_TITLE_HEIGHT) — 28 is a multiple of 4 and matches the existing PANEL_TITLE_HEIGHT constant defined in layout.rs. Retained as-is rather than rounding to 24 or 32 to avoid cascading layout changes across all existing panel headers. |
 | 2xl | 48px | Toast height (existing pattern from settings.rs) |
 
 Exceptions:
@@ -69,7 +69,7 @@ Colors are theme-derived. This contract specifies which existing `Theme` struct 
 |------|-------------|-------------|-------|
 | Dominant (60%) | `background` / `panel_background` | #282A36 / #2C2E3B | Window bg, panel body, tooltip bg |
 | Secondary (30%) | `bg_secondary` | #2C2E3B | Toast background, context menu background, tooltip background |
-| Accent (10%) | `divider_hover` (accent) | #BD93F9 | Toast left accent bar, "Focus" link in intervention toast, active context menu item highlight |
+| Accent (10%) | `divider_hover` (accent) | #BD93F9 | Toast left accent bar, "Focus Panel" link in intervention toast, active context menu item highlight |
 | Destructive | `error` (ThemeBase) | #FF5555 | Resource dot red state (>100% CPU), error toast accent bar |
 
 ### Resource Dot Colors (new semantic mappings)
@@ -88,7 +88,7 @@ Colors are theme-derived. This contract specifies which existing `Theme` struct 
 | Overlay | `[0.1, 0.2, 0.4, 0.35]` (linear RGBA) | Blue-tinted semi-transparent overlay covering entire panel rect |
 | Frozen icon | `fg_primary` with 0.8 alpha | Snowflake/pause Unicode glyph in panel header |
 
-Accent reserved for: toast left accent bar, "Focus" link text in intervention toasts, active/hovered context menu item highlight, frozen panel header icon glow. Never used for resource dots (those use success/warning/error semantic colors).
+Accent reserved for: toast left accent bar, "Focus Panel" link text in intervention toasts, active/hovered context menu item highlight, frozen panel header icon glow. Never used for resource dots (those use success/warning/error semantic colors).
 
 ---
 
@@ -164,18 +164,18 @@ Accent reserved for: toast left accent bar, "Focus" link text in intervention to
 
 | Type | Left Bar Color | Action Link | Action Link Color |
 |------|---------------|-------------|-------------------|
-| Intervention | `warning` | "Focus" | `accent` (divider_hover) |
+| Intervention | `warning` | "Focus Panel" | `accent` (divider_hover) |
 | Info | `accent` (divider_hover) | none | n/a |
-| Error | `error` | "Dismiss" | `fg_secondary` |
+| Error | `error` | "Dismiss Alert" | `fg_secondary` |
 | Conflict (existing) | `accent` (divider_hover) | "Undo" | `accent` (divider_hover) |
 
 #### Toast Text Layout
 
 | Element | Position | Size | Color |
 |---------|----------|------|-------|
-| Message text | x: toast_x + 10, y: toast_y + 8 | 13px, width: TOAST_WIDTH - 70 | `fg_primary` |
-| Attribution (panel name) | x: toast_x + 10, y: toast_y + 28 | 11px, width: TOAST_WIDTH - 70 | `fg_secondary` |
-| Action link | x: toast_x + TOAST_WIDTH - 50, y: toast_y + 14 | 13px, width: 40 | per type (see above) |
+| Message text | x: toast_x + 12, y: toast_y + 8 | 13px, width: TOAST_WIDTH - 100 | `fg_primary` |
+| Attribution (panel name) | x: toast_x + 12, y: toast_y + 28 | 11px, width: TOAST_WIDTH - 100 | `fg_secondary` |
+| Action link | x: toast_x + TOAST_WIDTH - 88, y: toast_y + 16 | 13px, width: 80 | per type (see above) |
 
 ### 6. Intervention Toast (specialization of Toast)
 
@@ -184,8 +184,8 @@ Accent reserved for: toast left accent bar, "Focus" link text in intervention to
 | Message format | "{tool} needs attention" (e.g. "Claude Code needs attention") |
 | Attribution format | "in {panel_title}" (e.g. "in Terminal") |
 | Click action | Focus the source panel (set keyboard focus, scroll grid if needed) |
-| Action link | "Focus" text, clicking focuses panel same as clicking toast body |
-| Dismiss behavior | Click "Focus" or click dismiss area. Suppresses that pattern match for remainder of terminal session. |
+| Action link | "Focus Panel" text, clicking focuses panel same as clicking toast body |
+| Dismiss behavior | Click "Focus Panel" or click dismiss area. Suppresses that pattern match for remainder of terminal session. |
 
 ---
 
@@ -193,7 +193,8 @@ Accent reserved for: toast left accent bar, "Focus" link text in intervention to
 
 | Element | Copy |
 |---------|------|
-| Primary CTA | "Focus" (action link on intervention toast, navigates to source panel) |
+| Primary CTA | "Focus Panel" (action link on intervention toast, navigates to source panel) |
+| Secondary CTA | "Dismiss Alert" (action link on error toast, removes the toast) |
 | Empty state — no processes | Resource dot uses `fg_secondary` color, no tooltip text change needed. Tooltip shows "No process" |
 | Empty state — no toasts | No visual element rendered (toast area is invisible when empty) |
 | Error — process monitoring failed | Toast: "Process monitoring unavailable" / "sysinfo failed to read process stats. Resource indicators disabled." |
@@ -253,7 +254,7 @@ Accent reserved for: toast left accent bar, "Focus" link text in intervention to
 3. Toast created: type=Intervention, message from pattern config
 4. Toast rendered in bottom-right stack
 5. After 8 seconds: toast auto-dismissed. Resource dot remains as secondary indicator.
-6. User clicks "Focus" or toast body -> source panel focused, toast dismissed
+6. User clicks "Focus Panel" or toast body -> source panel focused, toast dismissed
 7. User dismisses without focusing -> pattern suppressed for this terminal session
 
 ---
