@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Phase 4 context gathered
-last_updated: "2026-05-16T20:13:12.536Z"
-last_activity: 2026-05-16
+status: executing
+stopped_at: ""
+last_updated: "2026-05-17T12:00:00.000Z"
+last_activity: 2026-05-17
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 9
+  total_plans: 12
   completed_plans: 9
-  percent: 100
+  percent: 75
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** The project folder is the persistent AI context surface -- sketch, code, and document in one workspace where everything saves to the folder and everything is readable by AI agents.
-**Current focus:** Phase 03 complete — ready for Phase 04 (frame/theming)
+**Current focus:** Phase 04 executed — human verification pending
 
 ## Current Position
 
-Phase: 03 (webview-caps) — COMPLETE (UAT deferred)
+Phase: 04 (application-frame-and-theming) — IMPLEMENTED (human verification pending)
 Plan: 3 of 3 — all implemented
-Status: Implementation complete, human verification pending
-Last activity: 2026-05-16
+Status: All plans executed, awaiting manual test (Cmd+, settings, theme switching, layout)
+Last activity: 2026-05-17
 
 Progress: [██████████] 100%
 
@@ -125,7 +125,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T20:13:12.528Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-application-frame-and-theming/04-CONTEXT.md
-Pending UAT: Run `cargo run` and verify 11-point checklist in 03-03-PLAN.md Task 3
+Last session: 2026-05-17T12:00:00.000Z
+Stopped at: human verification deferred
+Resume file: None
+Pending UAT: Run `cargo run` and verify 10-point checklist (settings overlay, theme switching, layout, input isolation)

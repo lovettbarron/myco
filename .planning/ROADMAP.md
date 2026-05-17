@@ -93,12 +93,18 @@ Plans:
   2. User can open settings via Cmd+, and configure theme, fonts, keyboard shortcuts, and project preferences
   3. User can switch between Solarized and Obsidian minimalist themes, with the change applying immediately across all panels
   4. User can create custom color schemes via the theme configuration system
-**Plans**: TBD
+**Plans**: 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
+**Wave 1**
+- [x] 04-01-PLAN.md -- Theme system refactor (4 built-in themes, JSON loader, ThemeRegistry, live switching)
+
+**Wave 2** *(depends on Wave 1)*
+- [x] 04-02-PLAN.md -- Application frame chrome (stats bar, bottom bar with git, sidebar project switcher, layout deductions)
+
+**Wave 3** *(depends on Waves 1-2)*
+- [x] 04-03-PLAN.md -- Settings overlay (Cmd+,, theme dropdown, input isolation) — human verification pending
 
 ### Phase 5: Configuration and Persistence
 **Goal**: User's workspace layout and preferences survive application restarts and work across projects
