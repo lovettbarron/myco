@@ -141,11 +141,16 @@ Plans:
   1. Each panel displays its process resource usage (CPU, RAM) in the panel header
   2. User can freeze a panel that is consuming too many resources, stopping its process without closing the panel
   3. Application surfaces toast notifications when a terminal process requires human intervention (e.g., Claude Code permission requests)
-**Plans**: TBD
+**Plans**: 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 06-01: TBD
+**Wave 1**
+- [ ] 06-01-PLAN.md -- Resource monitor, toast system, and health dot (sysinfo polling, unified ToastManager, panel header resource dots with tooltip)
+
+**Wave 2** *(depends on Wave 1)*
+- [ ] 06-02-PLAN.md -- Freeze mechanics (SIGSTOP/SIGCONT, context menu, frozen overlay, input blocking)
+- [ ] 06-03-PLAN.md -- Intervention detection (terminal pattern scanning, toast alerts, click-to-focus, session suppression)
 
 ## Progress
 
@@ -160,4 +165,4 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | 3. Webview Caps | 1/3 | Executing | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |
 | 5. Configuration and Persistence | 4/5 | Gap closure | - |
-| 6. AI Monitoring and Ship | 0/1 | Not started | - |
+| 6. AI Monitoring and Ship | 0/3 | Planning complete | - |
