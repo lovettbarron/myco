@@ -12,7 +12,8 @@ The project folder is the context surface. Sketch an idea on the canvas, it's a 
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Per-cap process monitoring (CPU, RAM) with freeze capability — Validated in Phase 6: AI Monitoring and Ship
+- [x] Toast notifications for human intervention needed (e.g., Claude Code awaiting input) — Validated in Phase 6: AI Monitoring and Ship
 
 ### Active
 
