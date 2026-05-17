@@ -230,7 +230,7 @@ impl CanvasManager {
 
     /// Insert a canvas state without creating a webview.
     /// Used by integration tests to test handle_ipc_message without wry.
-    #[cfg(test)]
+    #[doc(hidden)]
     pub fn insert_canvas_state(&mut self, panel_id: PanelId, state: CanvasState) {
         self.canvases.insert(panel_id, state);
     }
