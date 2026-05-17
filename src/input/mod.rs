@@ -128,6 +128,8 @@ pub enum InputAction {
     OpenSettings,
     /// Close the settings overlay (Esc).
     CloseSettings,
+    /// Switch to a different project by path (from sidebar project switcher).
+    ProjectSwitch { path: PathBuf },
 }
 
 /// Convert an action ID string (from the shortcut registry) to an InputAction.

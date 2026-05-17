@@ -6,6 +6,7 @@ mod context;
 mod grid;
 mod input;
 mod markdown;
+mod picker;
 mod platform;
 mod renderer;
 mod settings;
