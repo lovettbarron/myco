@@ -48,6 +48,19 @@ pub struct Theme {
     pub sidebar_selected_bg: [f32; 4],
     pub sidebar_hover_bg: [f32; 4],
     pub sidebar_folder_text: [f32; 4],
+    // Semantic colors (used by status bars)
+    /// Success/positive color (e.g. clean git state, running process indicator).
+    pub success: [f32; 4],
+    /// Warning color (e.g. dirty git state, attention states).
+    pub warning: [f32; 4],
+    /// Secondary background (stats bar background, bottom bar, elevated surfaces).
+    pub bg_secondary: [f32; 4],
+    /// Secondary foreground (muted text, labels).
+    pub fg_secondary: [f32; 4],
+    /// Primary foreground (body text, values).
+    pub fg_primary: [f32; 4],
+    /// Border color (slot separators, dividers).
+    pub border: [f32; 4],
     // Focus
     pub unfocused_overlay: [f32; 4],
 }
@@ -62,6 +75,7 @@ impl Theme {
         let fg_secondary = hex_to_linear(&def.base.fg_secondary);
         let accent = hex_to_linear(&def.base.accent);
         let success = hex_to_linear(&def.base.success);
+        let warning = hex_to_linear(&def.base.warning);
         let border = hex_to_linear(&def.base.border);
 
         // Darkened bg_primary for code block backgrounds (multiply sRGB by 0.85 before conversion)
@@ -89,6 +103,12 @@ impl Theme {
             sidebar_selected_bg: bg_tertiary,
             sidebar_hover_bg: border,
             sidebar_folder_text: fg_secondary,
+            success,
+            warning,
+            bg_secondary,
+            fg_secondary,
+            fg_primary,
+            border,
             unfocused_overlay: [0.0, 0.0, 0.0, 0.25],
         };
 
@@ -114,6 +134,12 @@ impl Theme {
                 "sidebar_selected_bg" => theme.sidebar_selected_bg = color,
                 "sidebar_hover_bg" => theme.sidebar_hover_bg = color,
                 "sidebar_folder_text" => theme.sidebar_folder_text = color,
+                "success" => theme.success = color,
+                "warning" => theme.warning = color,
+                "bg_secondary" => theme.bg_secondary = color,
+                "fg_secondary" => theme.fg_secondary = color,
+                "fg_primary" => theme.fg_primary = color,
+                "border" => theme.border = color,
                 "unfocused_overlay" => theme.unfocused_overlay = color,
                 _ => {} // Unknown override keys are silently ignored
             }
