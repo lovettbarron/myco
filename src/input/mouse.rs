@@ -244,11 +244,19 @@ impl MouseState {
                 }
             }
             MouseButton::Right => {
-                // Right-click: determine split direction based on cursor position
-                // relative to panel center
+                // Right-click on panel header: show context menu (freeze/unfreeze/close)
                 if let Some(panel_id) =
+                    find_panel_title_bar_at(grid, x as f32, y as f32, title_bar_height)
+                {
+                    actions.push(InputAction::ContextMenu {
+                        panel_id,
+                        x: x as f32,
+                        y: y as f32,
+                    });
+                } else if let Some(panel_id) =
                     find_panel_at(grid, x as f32, y as f32, title_bar_height)
                 {
+                    // Right-click in panel body: determine split direction
                     if let Some(node) = grid.find_node(panel_id) {
                         let (px, py, pw, ph) = grid.get_panel_rect(node);
                         let py_offset = py + title_bar_height;
