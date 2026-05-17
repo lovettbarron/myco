@@ -149,8 +149,8 @@ Plans:
 - [x] 06-01-PLAN.md -- Resource monitor, toast system, and health dot (sysinfo polling, unified ToastManager, panel header resource dots with tooltip)
 
 **Wave 2** *(depends on Wave 1)*
-- [ ] 06-02-PLAN.md -- Freeze mechanics (SIGSTOP/SIGCONT, context menu, frozen overlay, input blocking)
-- [ ] 06-03-PLAN.md -- Intervention detection (terminal pattern scanning, toast alerts, click-to-focus, session suppression)
+- [x] 06-02-PLAN.md -- Freeze mechanics (SIGSTOP/SIGCONT, context menu, frozen overlay, input blocking)
+- [x] 06-03-PLAN.md -- Intervention detection (terminal pattern scanning, toast alerts, click-to-focus, session suppression)
 
 ## Progress
 
