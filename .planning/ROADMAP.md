@@ -130,7 +130,7 @@ Plans:
 - [x] 05-04-PLAN.md -- Settings shortcut rebinding UI and project section (interactive recording mode, conflict toasts, theme override dropdown)
 
 **Wave 3** *(gap closure, depends on Wave 1)*
-- [ ] 05-05-PLAN.md -- Fix Cmd+Q quit in workspace mode (add InputAction::Quit, wire save-before-exit in keyboard dispatch)
+- [x] 05-05-PLAN.md -- Fix Cmd+Q quit in workspace mode (add InputAction::Quit, wire save-before-exit in keyboard dispatch)
 
 ### Phase 6: AI Monitoring and Ship
 **Goal**: User can monitor panel resource usage, receive intervention alerts, and install Myco as a polished macOS application
