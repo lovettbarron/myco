@@ -126,8 +126,8 @@ Plans:
 - [x] 05-02-PLAN.md -- Configurable keyboard shortcuts (ShortcutRegistry, chord state machine, defaults table, replace hardcoded dispatch)
 
 **Wave 2** *(depends on Wave 1)*
-- [ ] 05-03-PLAN.md -- Project picker and registry (GPU-rendered picker, ~/.myco/projects.json, sidebar project switcher, AppState enum)
-- [ ] 05-04-PLAN.md -- Settings shortcut rebinding UI and project section (interactive recording mode, conflict toasts, theme override dropdown)
+- [x] 05-03-PLAN.md -- Project picker and registry (GPU-rendered picker, ~/.myco/projects.json, sidebar project switcher, AppState enum)
+- [x] 05-04-PLAN.md -- Settings shortcut rebinding UI and project section (interactive recording mode, conflict toasts, theme override dropdown)
 
 ### Phase 6: AI Monitoring and Ship
 **Goal**: User can monitor panel resource usage, receive intervention alerts, and install Myco as a polished macOS application
