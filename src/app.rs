@@ -2981,7 +2981,13 @@ impl ApplicationHandler<UserEvent> for App {
                         SettingsClickResult::ThemeSelected(name) => {
                             self.pending_actions.push(InputAction::ThemeSwitch { theme_name: name });
                         }
-                        SettingsClickResult::SectionChanged | SettingsClickResult::Consumed => {}
+                        SettingsClickResult::ProjectThemeChanged(_theme_opt) => {
+                            // Project theme changes are handled by auto-save
+                            // (project config persists via mark_dirty)
+                        }
+                        SettingsClickResult::ShortcutRecordingStarted
+                        | SettingsClickResult::SectionChanged
+                        | SettingsClickResult::Consumed => {}
                     }
                     if let Some(window) = &self.window {
                         window.request_redraw();
