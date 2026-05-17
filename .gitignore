@@ -17,3 +17,7 @@
 *.p8
 *.pem
 *.p12
+
+# Proptest regression files
+proptest-regressions/
+*.proptest-regressions
