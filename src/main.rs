@@ -8,6 +8,7 @@ mod markdown;
 mod platform;
 mod renderer;
 mod sidebar;
+mod status_bar;
 mod terminal;
 mod theme;
 mod watcher;
