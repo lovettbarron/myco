@@ -411,6 +411,14 @@ impl TerminalRenderer {
         self.buffer_cache.remove(panel_id);
     }
 
+    /// Invalidate all cached terminal buffers (e.g., after theme/palette change).
+    ///
+    /// When the ANSI palette changes, row content hashes remain the same but
+    /// colors resolve differently — all cached shaped buffers become stale.
+    pub fn invalidate_all_caches(&mut self) {
+        self.buffer_cache.clear();
+    }
+
     /// Build quad instances for terminal backgrounds and cursor.
     ///
     /// Produces quads for:
