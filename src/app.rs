@@ -35,6 +35,7 @@ use crate::canvas::CanvasManager;
 use crate::markdown::{MarkdownManager, MarkdownRenderer};
 use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_WIDTH};
 use crate::sidebar::renderer::SidebarRenderer;
+use crate::status_bar::{BottomBar, StatsBar, BOTTOM_BAR_HEIGHT, STATS_BAR_HEIGHT};
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
 use crate::theme::{Theme, ThemeRegistry, linear_to_srgb_u8};
@@ -43,6 +44,10 @@ use crate::window::create_window;
 
 /// Height of the app title bar in logical points.
 const TITLE_BAR_HEIGHT: f32 = 38.0;
+
+/// Combined top chrome height (title bar + stats bar) in logical points.
+/// The grid content area starts below this offset.
+const TOP_CHROME_HEIGHT: f32 = TITLE_BAR_HEIGHT + STATS_BAR_HEIGHT;
 
 /// Whether the project initialization prompt is being shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,6 +208,10 @@ pub struct App {
     context_menu_target: Option<std::path::PathBuf>,
     /// Accumulated sub-line pixel scroll delta for smooth trackpad scrolling.
     scroll_pixel_accumulator: f64,
+    /// Top stats bar (panel count, uptime).
+    stats_bar: StatsBar,
+    /// Bottom project info bar (git branch, dirty indicator, path).
+    bottom_bar: Option<BottomBar>,
 }
 
 impl App {
@@ -240,6 +249,8 @@ impl App {
             menu_state: None,
             context_menu_target: None,
             scroll_pixel_accumulator: 0.0,
+            stats_bar: StatsBar::new(),
+            bottom_bar: None,
         }
     }
 }
@@ -270,7 +281,7 @@ impl App {
                         }
                         (Orientation::Horizontal, Some(w)) => {
                             w.inner_size().height as f32 / self.scale_factor
-                                - TITLE_BAR_HEIGHT
+                                - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT
                         }
                         _ => return,
                     };
@@ -705,7 +716,7 @@ impl App {
                         if ts.has_new_output_while_scrolled {
                             if let Some(node) = grid.find_node(panel_id) {
                                 let (px, py, pw, ph) = grid.get_panel_rect(node);
-                                let py_offset = py + TITLE_BAR_HEIGHT;
+                                let py_offset = py + TOP_CHROME_HEIGHT;
                                 let indicator_w = 120.0_f32;
                                 let indicator_h = 22.0_f32;
                                 let indicator_x = px + pw / 2.0 - indicator_w / 2.0;
@@ -733,7 +744,7 @@ impl App {
                                 0.0
                             };
                             let viewport_y =
-                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT + bottom_offset;
+                                py + TOP_CHROME_HEIGHT + PANEL_TITLE_HEIGHT + bottom_offset;
                             let point = crate::terminal::selection::pixel_to_point(
                                 x,
                                 y,
@@ -772,7 +783,7 @@ impl App {
                                 0.0
                             };
                             let viewport_y =
-                                py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT + bottom_offset;
+                                py + TOP_CHROME_HEIGHT + PANEL_TITLE_HEIGHT + bottom_offset;
                             let point = crate::terminal::selection::pixel_to_point(
                                 x,
                                 y,
@@ -1285,7 +1296,7 @@ impl App {
         let (x, y, w, h) = grid.get_panel_rect(node_id);
         let sidebar_offset = self.sidebar_offset();
         let content_x = x + sidebar_offset + PANEL_CONTENT_PADDING;
-        let content_y = y + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+        let content_y = y + TOP_CHROME_HEIGHT + PANEL_TITLE_HEIGHT;
         let content_w = w - PANEL_CONTENT_PADDING * 2.0;
         let content_h = h - PANEL_TITLE_HEIGHT;
         Some((content_x, content_y, content_w, content_h))
@@ -1342,7 +1353,8 @@ impl App {
             if size.width > 0 && size.height > 0 {
                 let w = size.width as f32 / self.scale_factor;
                 let h = size.height as f32 / self.scale_factor;
-                let grid_height = h - TITLE_BAR_HEIGHT;
+                // Deduct title bar + stats bar from top, bottom bar from bottom
+                let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
 
                 // D-11: Subtract sidebar width when visible
                 let sidebar_w = if self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false) {
@@ -1424,11 +1436,31 @@ impl App {
 
         let sidebar_offset = self.sidebar_offset();
 
+        // Stats bar quads (below title bar, full width minus sidebar)
+        {
+            let stats_bar_x = sidebar_offset;
+            let stats_bar_w = width - sidebar_offset;
+            let stats_quads = self.stats_bar.build_quads(
+                TITLE_BAR_HEIGHT,
+                stats_bar_x,
+                stats_bar_w,
+                &self.theme,
+            );
+            quads.extend(stats_quads);
+        }
+
+        // Bottom bar quads (full width, pinned to bottom)
+        if let Some(bottom_bar) = &self.bottom_bar {
+            let bottom_bar_y = height - BOTTOM_BAR_HEIGHT;
+            let bottom_quads = bottom_bar.build_quads(bottom_bar_y, width, &self.theme);
+            quads.extend(bottom_quads);
+        }
+
         // Render sidebar quads
         if let Some(sidebar) = &self.sidebar {
             if sidebar.visible {
-                let sidebar_viewport_y = TITLE_BAR_HEIGHT;
-                let sidebar_viewport_h = height - TITLE_BAR_HEIGHT;
+                let sidebar_viewport_y = TOP_CHROME_HEIGHT;
+                let sidebar_viewport_h = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
                 let sidebar_quads = SidebarRenderer::build_quads(
                     sidebar,
                     sidebar_viewport_y,
@@ -1444,7 +1476,7 @@ impl App {
             let (px, py, pw, ph) = grid.get_panel_rect(node);
             // Offset panel x position by sidebar width
             let px = px + sidebar_offset;
-            let py_offset = py + TITLE_BAR_HEIGHT;
+            let py_offset = py + TOP_CHROME_HEIGHT;
 
             // Panel background quad
             quads.push(QuadInstance {
@@ -1692,7 +1724,7 @@ impl App {
             }
             let (px, py, pw, ph) = grid.get_panel_rect(node);
             quads.push(QuadInstance {
-                position: [px + sidebar_offset, py + TITLE_BAR_HEIGHT],
+                position: [px + sidebar_offset, py + TOP_CHROME_HEIGHT],
                 size: [pw, ph],
                 color: self.theme.unfocused_overlay,
                 corner_radius: 0.0,
@@ -1711,11 +1743,11 @@ impl App {
 
             match div.orientation {
                 Orientation::Vertical => {
-                    let grid_height = height - TITLE_BAR_HEIGHT;
+                    let grid_height = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
                     quads.push(QuadInstance {
                         position: [
                             div.position - DIVIDER_VISUAL_WIDTH / 2.0 + sidebar_offset,
-                            TITLE_BAR_HEIGHT,
+                            TOP_CHROME_HEIGHT,
                         ],
                         size: [DIVIDER_VISUAL_WIDTH, grid_height],
                         color,
@@ -1727,7 +1759,7 @@ impl App {
                     quads.push(QuadInstance {
                         position: [
                             sidebar_offset,
-                            div.position + TITLE_BAR_HEIGHT
+                            div.position + TOP_CHROME_HEIGHT
                                 - DIVIDER_VISUAL_WIDTH / 2.0,
                         ],
                         size: [width - sidebar_offset, DIVIDER_VISUAL_WIDTH],
@@ -1802,11 +1834,31 @@ impl App {
 
         let sidebar_offset = self.sidebar_offset();
 
+        // Stats bar labels
+        {
+            let stats_bar_x = sidebar_offset;
+            let stats_bar_w = width - sidebar_offset;
+            let stats_labels = self.stats_bar.build_labels(
+                TITLE_BAR_HEIGHT,
+                stats_bar_x,
+                stats_bar_w,
+                &self.theme,
+            );
+            labels.extend(stats_labels);
+        }
+
+        // Bottom bar labels
+        if let Some(bottom_bar) = &self.bottom_bar {
+            let bottom_bar_y = height - BOTTOM_BAR_HEIGHT;
+            let bottom_labels = bottom_bar.build_labels(bottom_bar_y, width, &self.theme);
+            labels.extend(bottom_labels);
+        }
+
         // Panel labels
         for &(node, panel_id) in grid.panel_nodes() {
             let (px, py, pw, ph) = grid.get_panel_rect(node);
             let px = px + sidebar_offset;
-            let py_offset = py + TITLE_BAR_HEIGHT;
+            let py_offset = py + TOP_CHROME_HEIGHT;
 
             if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
                 // Panel title bar label (show title for markdown, type for others)
@@ -2163,7 +2215,7 @@ impl ApplicationHandler<UserEvent> for App {
         if size.width > 0 && size.height > 0 {
             let w = size.width as f32 / self.scale_factor;
             let h = size.height as f32 / self.scale_factor;
-            let grid_height = h - TITLE_BAR_HEIGHT;
+            let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
             grid.compute(w, grid_height.max(1.0));
             self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
         }
@@ -2177,6 +2229,9 @@ impl ApplicationHandler<UserEvent> for App {
         let project_dir =
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         self.project_dir = Some(project_dir.clone());
+
+        // Initialize bottom bar with project directory (D-07)
+        self.bottom_bar = Some(BottomBar::new(project_dir.clone()));
 
         // Check if .myco folder exists — if not, prompt user to initialize
         let myco_dir = project_dir.join(".myco");
@@ -2270,8 +2325,8 @@ impl ApplicationHandler<UserEvent> for App {
 
                 // Update sidebar hover state
                 let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
-                if sidebar_visible && (lx as f32) < SIDEBAR_WIDTH && (ly as f32) > TITLE_BAR_HEIGHT {
-                    let sidebar_y = ly as f32 - TITLE_BAR_HEIGHT;
+                if sidebar_visible && (lx as f32) < SIDEBAR_WIDTH && (ly as f32) > TOP_CHROME_HEIGHT {
+                    let sidebar_y = ly as f32 - TOP_CHROME_HEIGHT;
                     if let Some(sidebar) = &mut self.sidebar {
                         let prev = sidebar.hovered;
                         sidebar.hovered = sidebar.entry_at_y(sidebar_y);
@@ -2298,7 +2353,7 @@ impl ApplicationHandler<UserEvent> for App {
                         ly,
                         &self.dividers,
                         grid,
-                        TITLE_BAR_HEIGHT,
+                        TOP_CHROME_HEIGHT,
                     );
                     let actions: Vec<_> = actions;
                     for action in actions {
@@ -2320,11 +2375,11 @@ impl ApplicationHandler<UserEvent> for App {
                 let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
                 if sidebar_visible
                     && lx < SIDEBAR_WIDTH
-                    && ly > TITLE_BAR_HEIGHT
+                    && ly > TOP_CHROME_HEIGHT
                     && state == ElementState::Pressed
                     && button == MouseButton::Left
                 {
-                    let sidebar_y = ly - TITLE_BAR_HEIGHT;
+                    let sidebar_y = ly - TOP_CHROME_HEIGHT;
                     // Handle sidebar click
                     if let Some(sidebar) = &mut self.sidebar {
                         if let Some(index) = sidebar.entry_at_y(sidebar_y) {
@@ -2361,11 +2416,11 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 } else if sidebar_visible
                     && lx < SIDEBAR_WIDTH
-                    && ly > TITLE_BAR_HEIGHT
+                    && ly > TOP_CHROME_HEIGHT
                     && state == ElementState::Pressed
                     && button == MouseButton::Right
                 {
-                    let sidebar_y = ly - TITLE_BAR_HEIGHT;
+                    let sidebar_y = ly - TOP_CHROME_HEIGHT;
                     if let Some(sidebar) = &mut self.sidebar {
                         if let Some(index) = sidebar.entry_at_y(sidebar_y) {
                             sidebar.selected = Some(index);
@@ -2393,14 +2448,14 @@ impl ApplicationHandler<UserEvent> for App {
                             button,
                             &self.dividers,
                             grid,
-                            TITLE_BAR_HEIGHT,
+                            TOP_CHROME_HEIGHT,
                             &panel_types,
                             &self.modifiers,
                         ),
                         ElementState::Released => self.mouse_state.on_mouse_release(
                             button,
                             grid,
-                            TITLE_BAR_HEIGHT,
+                            TOP_CHROME_HEIGHT,
                         ),
                     };
                     let actions: Vec<_> = actions;
@@ -2422,7 +2477,7 @@ impl ApplicationHandler<UserEvent> for App {
                     };
                     if let (Some(sidebar), Some(window)) = (&mut self.sidebar, &self.window) {
                         let size = window.inner_size();
-                        let viewport_h = size.height as f32 / self.scale_factor - TITLE_BAR_HEIGHT;
+                        let viewport_h = size.height as f32 / self.scale_factor - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
                         sidebar.scroll(-pixel_delta, viewport_h);
                     }
                 } else {
@@ -2454,7 +2509,7 @@ impl ApplicationHandler<UserEvent> for App {
                             let actions = self.mouse_state.on_mouse_wheel(
                                 lines as f32,
                                 grid,
-                                TITLE_BAR_HEIGHT,
+                                TOP_CHROME_HEIGHT,
                                 sidebar_off,
                                 &panel_types,
                             );
@@ -2590,6 +2645,15 @@ impl ApplicationHandler<UserEvent> for App {
 
                     let cell_count: usize = snapshots.values().map(|s| s.cols * s.rows.len()).sum();
 
+                    // Update stats bar slots before rendering
+                    self.stats_bar.update_panel_count(self.panels.len());
+                    self.stats_bar.update_uptime();
+
+                    // Refresh bottom bar git info cache (5s interval)
+                    if let Some(bottom_bar) = &mut self.bottom_bar {
+                        bottom_bar.refresh();
+                    }
+
                     // Build frame data in logical coordinates
                     let (logical_quads, pill_labels) = self.build_quads(logical_w, logical_h, &snapshots, &pill_data);
                     let mut logical_labels = self.build_labels(logical_w, logical_h, &snapshots);
@@ -2638,7 +2702,7 @@ impl ApplicationHandler<UserEvent> for App {
                                                 let (px, py, pw, ph) =
                                                     grid.get_panel_rect(node);
                                                 let content_y =
-                                                    py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+                                                    py + TOP_CHROME_HEIGHT + PANEL_TITLE_HEIGHT;
                                                 let content_h = ph - PANEL_TITLE_HEIGHT;
 
                                                 // Bottom-align: push content down when it doesn't fill the viewport
@@ -2679,7 +2743,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 if is_markdown {
                                     if let Some(state) = mm.get_mut(&panel_id) {
                                         let (px, py, pw, ph) = grid.get_panel_rect(node);
-                                        let content_y = py + TITLE_BAR_HEIGHT + PANEL_TITLE_HEIGHT;
+                                        let content_y = py + TOP_CHROME_HEIGHT + PANEL_TITLE_HEIGHT;
                                         let content_h = ph - PANEL_TITLE_HEIGHT;
 
                                         let dirty = state.dirty;
@@ -2705,8 +2769,8 @@ impl ApplicationHandler<UserEvent> for App {
                         // Sidebar buffer preparation
                         if let Some(sidebar) = &self.sidebar {
                             if sidebar.visible {
-                                let sidebar_viewport_y = TITLE_BAR_HEIGHT;
-                                let sidebar_viewport_h = logical_h - TITLE_BAR_HEIGHT;
+                                let sidebar_viewport_y = TOP_CHROME_HEIGHT;
+                                let sidebar_viewport_h = logical_h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
                                 let (bufs, metas) = SidebarRenderer::prepare_buffers(
                                     font_system,
                                     sidebar,
@@ -2740,9 +2804,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 scale: s,
                                 bounds: TextBounds {
                                     left: 0,
-                                    top: (TITLE_BAR_HEIGHT * s) as i32,
+                                    top: (TOP_CHROME_HEIGHT * s) as i32,
                                     right: (SIDEBAR_WIDTH * s) as i32,
-                                    bottom: (logical_h * s) as i32,
+                                    bottom: ((logical_h - BOTTOM_BAR_HEIGHT) * s) as i32,
                                 },
                                 default_color,
                                 custom_glyphs: &[],

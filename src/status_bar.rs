@@ -211,12 +211,16 @@ impl ProjectGitInfo {
         }
     }
 
-    /// Get the current git status, refreshing from disk if stale (5s cache).
-    pub fn status(&mut self) -> Option<&GitStatus> {
+    /// Refresh git status from disk if stale (5s cache). Call before rendering.
+    pub fn refresh(&mut self) {
         if self.last_refresh.elapsed() > std::time::Duration::from_secs(5) {
             self.last_refresh = Instant::now();
             self.cached = Self::fetch(&self.project_dir);
         }
+    }
+
+    /// Get the cached git status (call refresh() first).
+    pub fn status(&self) -> Option<&GitStatus> {
         self.cached.as_ref()
     }
 
@@ -254,9 +258,14 @@ impl BottomBar {
         }
     }
 
+    /// Refresh git info cache. Call once per frame before build_quads/build_labels.
+    pub fn refresh(&mut self) {
+        self.git_info.refresh();
+    }
+
     /// Build quads for the bottom bar background and dirty indicator dot.
     pub fn build_quads(
-        &mut self,
+        &self,
         bottom_bar_y: f32,
         width: f32,
         theme: &Theme,
@@ -300,7 +309,7 @@ impl BottomBar {
 
     /// Build text labels for the bottom bar.
     pub fn build_labels(
-        &mut self,
+        &self,
         bottom_bar_y: f32,
         width: f32,
         theme: &Theme,
@@ -405,6 +414,7 @@ mod tests {
         let dir = std::env::temp_dir().join("myco-test-no-git");
         let _ = std::fs::create_dir_all(&dir);
         let mut info = ProjectGitInfo::new(dir.clone());
+        info.refresh();
         assert!(info.status().is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
