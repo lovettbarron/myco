@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Application Frame and Theming** - Navigation bars, status bars, settings, and theme system
 - [ ] **Phase 5: Configuration and Persistence** - Project config, global config, layout save/restore, keyboard shortcuts
 - [ ] **Phase 6: AI Monitoring and Ship** - Process monitoring, intervention toasts, and v1 distribution readiness
-- [ ] **Phase 7: Testing Infrastructure** - Headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, and criterion benchmarks
+- [x] **Phase 7: Testing Infrastructure** - Headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, and criterion benchmarks (completed 2026-05-17)
 - [ ] **Phase 8: Agent Monitor Cap** - Dedicated GPU-rendered panel showing running AI agent sessions with status, token usage, running time, and intervention history
 
 ## Phase Details
@@ -169,11 +169,11 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 07-01-PLAN.md -- Library crate extraction, PTY integration tests, and IPC contract tests (lib.rs, dev-deps, TEST-02, TEST-03)
+- [x] 07-01-PLAN.md -- Library crate extraction, PTY integration tests, and IPC contract tests (lib.rs, dev-deps, TEST-02, TEST-03)
 
 **Wave 2** *(depends on Wave 1)*
-- [ ] 07-02-PLAN.md -- Headless GPU snapshot tests with golden image comparison (TEST-01)
-- [ ] 07-03-PLAN.md -- Property-based fuzzing (proptest) and criterion benchmarks (TEST-04, TEST-05)
+- [x] 07-02-PLAN.md -- Headless GPU snapshot tests with golden image comparison (TEST-01)
+- [x] 07-03-PLAN.md -- Property-based fuzzing (proptest) and criterion benchmarks (TEST-04, TEST-05)
 
 ### Phase 8: Agent Monitor Cap
 **Goal**: User can open a dedicated panel that displays all running AI agent sessions with real-time status, resource usage, token spend, and intervention history — promoting the toast-based monitoring from Phase 6 into a full first-class cap
