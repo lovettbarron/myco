@@ -23,6 +23,8 @@ pub enum UserEvent {
     FileChanged(Vec<std::path::PathBuf>),
     CanvasMessage(PanelId, String),
     ResourceUpdate(Vec<crate::monitor::ResourceUpdate>),
+    /// Alert that a terminal process needs human attention (D-05).
+    InterventionAlert(crate::monitor::InterventionAlert),
     #[cfg(target_os = "macos")]
     MenuAction(u32),
 }
@@ -3002,6 +3004,9 @@ impl ApplicationHandler<UserEvent> for App {
                         },
                     );
                 }
+            }
+            UserEvent::InterventionAlert(_alert) => {
+                // Handled in Task 2: creates intervention toasts.
             }
             UserEvent::FileChanged(paths) => {
                 if let Some(mm) = &mut self.markdown_manager {

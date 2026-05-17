@@ -4,6 +4,10 @@
 //! tracked PIDs and sends `UserEvent::ResourceUpdate` to the event loop.
 //! Resource dots in panel headers use `dot_color()` for threshold-based
 //! coloring (D-01, D-03).
+//!
+//! Also integrates intervention detection: scans terminal visible text
+//! each poll cycle and sends `UserEvent::InterventionAlert` when patterns
+//! match (D-05).
 
 pub mod intervention;
 pub mod patterns;
@@ -17,6 +21,7 @@ use tracing::{debug, warn};
 use winit::event_loop::EventLoopProxy;
 
 use crate::app::UserEvent;
+use crate::grid::panel::PanelId;
 use crate::theme::Theme;
 
 /// Polling interval for resource checks (D-03: every 2 seconds).
@@ -54,10 +59,37 @@ pub struct ResourceUpdate {
     pub memory_bytes: u64,
 }
 
+/// Alert that a terminal process needs human attention (D-05).
+///
+/// Sent from the background monitor thread to the main event loop when
+/// pattern matching or idle-waiting heuristic detects an intervention need.
+#[derive(Debug, Clone)]
+pub struct InterventionAlert {
+    /// Panel whose terminal triggered the alert.
+    pub panel_id: PanelId,
+    /// Pattern ID that matched (or "__idle_heuristic" for idle detection).
+    pub pattern_id: String,
+    /// Tool name for attribution (e.g., "Claude Code", "System", "Process").
+    pub tool_name: String,
+    /// Human-readable message to display in the toast.
+    pub message: String,
+}
+
+/// Input data sent from the main thread to the background monitor.
+///
+/// Combines PID tracking (for resource monitoring) with terminal text
+/// snapshots (for intervention detection).
+pub struct MonitorInput {
+    /// Panel-to-PID mapping for resource polling.
+    pub pids: Vec<(PanelId, u32)>,
+    /// Panel-to-visible-text mapping for intervention scanning.
+    pub terminal_texts: Vec<(PanelId, String)>,
+}
+
 /// Background resource monitor that polls tracked PIDs via sysinfo.
 pub struct ResourceMonitor {
-    /// Sender to update the tracked PID list.
-    pid_sender: mpsc::Sender<Vec<u32>>,
+    /// Sender to update the tracked state (PIDs + terminal texts).
+    state_sender: mpsc::Sender<MonitorInput>,
     /// Handle to the background polling thread.
     _handle: JoinHandle<()>,
 }
@@ -70,23 +102,35 @@ impl ResourceMonitor {
     /// 2. Polls every 2 seconds (D-03)
     /// 3. Does a "priming" refresh on first iteration (sysinfo returns 0% on first call)
     /// 4. Sends `UserEvent::ResourceUpdate` for each tracked PID
+    /// 5. Scans terminal texts for intervention patterns (D-05)
+    /// 6. Sends `UserEvent::InterventionAlert` for matches
     pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
-        let (pid_sender, pid_receiver) = mpsc::channel::<Vec<u32>>();
+        let (state_sender, state_receiver) = mpsc::channel::<MonitorInput>();
 
         let handle = std::thread::Builder::new()
             .name("resource-monitor".to_string())
             .spawn(move || {
                 let mut system = System::new();
-                let mut tracked_pids: Vec<u32> = Vec::new();
+                let mut current_input = MonitorInput {
+                    pids: Vec::new(),
+                    terminal_texts: Vec::new(),
+                };
                 let mut primed = false;
+                let mut intervention_detector = intervention::InterventionDetector::new();
 
                 loop {
-                    // Check for updated PID list (non-blocking)
-                    while let Ok(new_pids) = pid_receiver.try_recv() {
-                        tracked_pids = new_pids;
-                        debug!("Resource monitor: tracking {} PIDs", tracked_pids.len());
+                    // Check for updated state (non-blocking)
+                    while let Ok(new_input) = state_receiver.try_recv() {
+                        current_input = new_input;
+                        debug!(
+                            "Resource monitor: tracking {} PIDs, {} terminal texts",
+                            current_input.pids.len(),
+                            current_input.terminal_texts.len()
+                        );
                     }
 
+                    // --- Resource polling ---
+                    let tracked_pids: Vec<u32> = current_input.pids.iter().map(|(_, pid)| *pid).collect();
                     if !tracked_pids.is_empty() {
                         let sysinfo_pids: Vec<Pid> = tracked_pids
                             .iter()
@@ -118,11 +162,11 @@ impl ResourceMonitor {
                         let updates: Vec<ResourceUpdate> = tracked_pids
                             .iter()
                             .filter_map(|&pid| {
-                                system.process(Pid::from_u32(pid)).map(|proc| {
+                                system.process(Pid::from_u32(pid)).map(|proc_info| {
                                     ResourceUpdate {
                                         pid,
-                                        cpu_percent: proc.cpu_usage(),
-                                        memory_bytes: proc.memory(),
+                                        cpu_percent: proc_info.cpu_usage(),
+                                        memory_bytes: proc_info.memory(),
                                     }
                                 })
                             })
@@ -140,24 +184,62 @@ impl ResourceMonitor {
                         }
                     }
 
+                    // --- Intervention detection (D-05) ---
+                    for (panel_id, text) in &current_input.terminal_texts {
+                        if !intervention_detector.should_scan(panel_id) {
+                            continue;
+                        }
+
+                        // Layer 1: Pattern matching for known tools
+                        let pattern_matches = intervention_detector.scan_text(text);
+
+                        if !pattern_matches.is_empty() {
+                            for (pattern_id, tool_name) in &pattern_matches {
+                                let message = intervention_detector.format_message(pattern_id, tool_name);
+                                let alert = InterventionAlert {
+                                    panel_id: *panel_id,
+                                    pattern_id: pattern_id.clone(),
+                                    tool_name: tool_name.clone(),
+                                    message,
+                                };
+                                if proxy.send_event(UserEvent::InterventionAlert(alert)).is_err() {
+                                    debug!("Resource monitor: event loop closed, exiting");
+                                    return;
+                                }
+                            }
+                        }
+
+                        intervention_detector.mark_scanned(*panel_id);
+                    }
+
                     std::thread::sleep(POLL_INTERVAL);
                 }
             })
             .expect("failed to spawn resource monitor thread");
 
         Self {
-            pid_sender,
+            state_sender,
             _handle: handle,
         }
     }
 
-    /// Update the list of tracked PIDs.
+    /// Update the monitor state with PIDs and terminal texts.
     ///
     /// Only PIDs we ourselves spawned should be tracked (T-06-02).
-    pub fn update_tracked_pids(&self, pids: Vec<u32>) {
-        if let Err(e) = self.pid_sender.send(pids) {
-            warn!("Failed to update tracked PIDs: {}", e);
+    pub fn update_state(&self, input: MonitorInput) {
+        if let Err(e) = self.state_sender.send(input) {
+            warn!("Failed to update monitor state: {}", e);
         }
+    }
+
+    /// Legacy method: update only tracked PIDs (no terminal texts).
+    ///
+    /// Convenience wrapper for callers that don't have terminal text snapshots.
+    pub fn update_tracked_pids(&self, pids: Vec<u32>) {
+        self.update_state(MonitorInput {
+            pids: pids.into_iter().map(|pid| (PanelId(0), pid)).collect(),
+            terminal_texts: Vec::new(),
+        });
     }
 }
 
