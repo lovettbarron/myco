@@ -95,6 +95,7 @@ fn handle_terminal_key(
                 "c" => Some(InputAction::TerminalCopy { panel_id }),
                 "v" => Some(InputAction::TerminalPaste { panel_id }),
                 "f" => Some(InputAction::TerminalSearchOpen { panel_id }),
+                "," => Some(InputAction::OpenSettings),
                 "+" | "=" => Some(InputAction::TerminalFontSizeChange {
                     panel_id,
                     delta: 1.0,
@@ -209,6 +210,7 @@ fn handle_generic_key(
             "t" => Some(InputAction::CreateTerminal),
             "T" => Some(InputAction::CreateCanvas),
             "b" => Some(InputAction::ToggleSidebar),
+            "," => Some(InputAction::OpenSettings),
             "]" => Some(InputAction::FocusNextPanel),
             "[" => Some(InputAction::FocusPrevPanel),
             _ => None,

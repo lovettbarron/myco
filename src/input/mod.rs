@@ -124,6 +124,10 @@ pub enum InputAction {
     InitPromptDismiss,
     /// Switch the active theme by name.
     ThemeSwitch { theme_name: String },
+    /// Open the settings overlay (Cmd+,).
+    OpenSettings,
+    /// Close the settings overlay (Esc).
+    CloseSettings,
 }
 
 /// Cursor styles for different interaction states.
