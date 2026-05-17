@@ -268,6 +268,9 @@ pub struct App {
     toast_manager: crate::toast::ToastManager,
     /// Tooltip state for resource dot hover.
     tooltip_state: Option<TooltipState>,
+    /// Last time the resource monitor was updated with terminal texts.
+    /// Initialized to 10 seconds ago so the first update fires immediately.
+    last_monitor_update: Instant,
 }
 
 impl App {
@@ -319,6 +322,7 @@ impl App {
             resource_states: HashMap::new(),
             toast_manager: crate::toast::ToastManager::new(),
             tooltip_state: None,
+            last_monitor_update: Instant::now() - Duration::from_secs(10),
         }
     }
 }
@@ -1539,11 +1543,35 @@ impl App {
                     }
                 }
             }
-            InputAction::DismissToast { .. } => {
-                // Toast dismissal (future plan).
+            InputAction::DismissToast { toast_id } => {
+                // Only suppress on EXPLICIT dismiss (not auto-expiry, per D-07).
+                // Auto-expiry is handled by ToastManager::tick() which does NOT suppress.
+                // Copy suppression data before mutating toast_manager.
+                let suppress_info = self.toast_manager.visible_toasts().iter()
+                    .find(|t| t.id == toast_id)
+                    .and_then(|t| {
+                        if t.toast_type == crate::toast::ToastType::Intervention {
+                            if let (Some(ref pid), Some(panel)) = (&t.pattern_id, &t.source_panel) {
+                                return Some((pid.clone(), *panel));
+                            }
+                        }
+                        None
+                    });
+                if let Some((pattern_id, panel_id)) = suppress_info {
+                    self.toast_manager.suppress_pattern(&pattern_id, panel_id);
+                }
+                self.toast_manager.dismiss(toast_id);
             }
-            InputAction::ToastAction { .. } => {
-                // Toast action handling (future plan).
+            InputAction::ToastAction { toast_id } => {
+                // Toast action click: focus the source panel and dismiss (no suppression).
+                // Per D-12: clicking "Focus Panel" focuses the terminal, not suppress.
+                let source_panel = self.toast_manager.visible_toasts().iter()
+                    .find(|t| t.id == toast_id)
+                    .and_then(|t| t.source_panel);
+                if let Some(panel_id) = source_panel {
+                    self.focused_panel = Some(panel_id);
+                }
+                self.toast_manager.dismiss(toast_id);
             }
             InputAction::Quit => {
                 // Handled in window_event before reaching process_action.
@@ -2027,6 +2055,94 @@ impl App {
                 monitor.update_tracked_pids(all_pids);
             }
         }
+    }
+
+    /// Periodic update: send terminal texts and PIDs to the background monitor.
+    ///
+    /// Called every 2 seconds. Extracts visible text from each non-exited,
+    /// non-frozen terminal panel and sends it alongside PIDs to the
+    /// ResourceMonitor for intervention detection (D-05).
+    fn update_monitor_state(&mut self) {
+        if self.last_monitor_update.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.last_monitor_update = Instant::now();
+
+        let tm = match &self.terminal_manager {
+            Some(tm) => tm,
+            None => return,
+        };
+
+        let mut pids = Vec::new();
+        let mut terminal_texts = Vec::new();
+
+        for panel in &self.panels {
+            if panel.panel_type != PanelType::Terminal || panel.frozen {
+                continue;
+            }
+            if let Some(ts) = tm.get(&panel.id) {
+                if ts.exited {
+                    continue;
+                }
+                if let Some(pid) = ts.child_pid {
+                    pids.push((panel.id, pid));
+                }
+                let text = Self::extract_terminal_visible_text(&ts.term);
+                terminal_texts.push((panel.id, text));
+            }
+        }
+
+        if let Some(monitor) = &self.resource_monitor {
+            monitor.update_state(crate::monitor::MonitorInput {
+                pids,
+                terminal_texts,
+            });
+        }
+    }
+
+    /// Extract the visible text from a terminal grid.
+    ///
+    /// Locks the terminal briefly, reads all visible rows, and returns
+    /// the concatenated text. Used for intervention pattern matching.
+    fn extract_terminal_visible_text(
+        term: &Arc<alacritty_terminal::sync::FairMutex<alacritty_terminal::Term<crate::terminal::event_listener::MycoEventListener>>>,
+    ) -> String {
+        use alacritty_terminal::grid::Dimensions as TermDims;
+
+        let term = term.lock();
+        let screen_lines = term.screen_lines();
+        let cols = term.columns();
+
+        let mut text = String::with_capacity(cols * screen_lines + screen_lines);
+        let content = term.renderable_content();
+
+        // Iterate visible cells from the display iterator
+        let mut current_line: i32 = -1;
+        let mut line_chars = Vec::with_capacity(cols);
+
+        for indexed in content.display_iter {
+            let line = indexed.point.line.0;
+            if line != current_line {
+                if current_line >= 0 {
+                    // Flush previous line
+                    let line_str: String = line_chars.iter().collect();
+                    text.push_str(line_str.trim_end());
+                    text.push('\n');
+                    line_chars.clear();
+                }
+                current_line = line;
+            }
+            line_chars.push(indexed.cell.c);
+        }
+        // Flush last line
+        if !line_chars.is_empty() {
+            let line_str: String = line_chars.iter().collect();
+            text.push_str(line_str.trim_end());
+            text.push('\n');
+        }
+
+        drop(term); // Release lock immediately (Pitfall 4: FairMutex contention)
+        text
     }
 
     /// Update resource dot tooltip state based on cursor position.
@@ -3005,8 +3121,25 @@ impl ApplicationHandler<UserEvent> for App {
                     );
                 }
             }
-            UserEvent::InterventionAlert(_alert) => {
-                // Handled in Task 2: creates intervention toasts.
+            UserEvent::InterventionAlert(alert) => {
+                // Check suppression before creating toast (per D-07)
+                if !self.toast_manager.is_suppressed(&alert.pattern_id, &alert.panel_id) {
+                    let panel_title = self.panels
+                        .iter()
+                        .find(|p| p.id == alert.panel_id)
+                        .map(|p| p.title.clone())
+                        .unwrap_or_else(|| "Terminal".to_string());
+
+                    self.toast_manager.add(
+                        crate::toast::ToastType::Intervention,
+                        alert.message.clone(),
+                        Some(format!("in {}", panel_title)),
+                        Some(alert.panel_id),
+                        Some(alert.pattern_id.clone()),
+                        Some("Focus Panel".to_string()),
+                        crate::toast::INTERVENTION_TOAST_DURATION,
+                    );
+                }
             }
             UserEvent::FileChanged(paths) => {
                 if let Some(mm) = &mut self.markdown_manager {
@@ -4268,6 +4401,9 @@ impl ApplicationHandler<UserEvent> for App {
                 needs_render = true;
             }
         }
+
+        // Periodic intervention detection: send terminal texts to background monitor (D-05)
+        self.update_monitor_state();
 
         // Tooltip redraw (for delayed appearance)
         if let Some(ref tooltip) = self.tooltip_state {
