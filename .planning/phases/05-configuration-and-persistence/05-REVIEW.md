@@ -1,6 +1,6 @@
 ---
 phase: 05-configuration-and-persistence
-reviewed: 2026-05-17T00:00:00Z
+reviewed: 2026-05-17T12:00:00Z
 depth: standard
 files_reviewed: 19
 files_reviewed_list:
@@ -25,15 +25,15 @@ files_reviewed_list:
   - src/sidebar/mod.rs
 findings:
   critical: 5
-  warning: 8
-  info: 4
-  total: 17
+  warning: 10
+  info: 5
+  total: 20
 status: issues_found
 ---
 
 # Phase 05: Code Review Report
 
-**Reviewed:** 2026-05-17
+**Reviewed:** 2026-05-17 (re-reviewed for 05-05 Cmd+Q changes)
 **Depth:** standard
 **Files Reviewed:** 19
 **Status:** issues_found
@@ -43,6 +43,8 @@ status: issues_found
 This phase implements configuration persistence (project config, global preferences, shortcut registry, project registry), the project picker, settings overlay, keyboard/shortcut system, and sidebar. The overall architecture is sound and defensive patterns are applied consistently (file size limits, atomic writes, path validation). However, there are several correctness bugs and security gaps that need attention before shipping.
 
 The most serious issues are: a path traversal bypass in the config validator that misses the Windows-style `..` separator and embedded-null attacks; a rebind operation that can silently leave the registry in an inconsistent state after a conflict; a chord state machine bug that can drop input events; and an unchecked byte-slice indexing in the path-truncation code that will panic on multi-byte UTF-8 paths.
+
+**05-05 re-review (Cmd+Q quit fix):** Two new warnings were added. The `InputAction::Quit` variant and `action_from_id("quit")` change in `src/input/mod.rs` are structurally correct. The workspace quit handler in `src/app.rs` saves config correctly. However, there are two behavioral gaps: the settings overlay silently swallows Cmd+Q (user cannot quit while settings is open), and the picker-mode Cmd+Q codepath calls `event_loop.exit()` without saving project config — inconsistent with the workspace path.
 
 ---
 
@@ -375,6 +377,69 @@ Apply same fix to `persistence.rs:94-96` and `registry.rs:171-173`.
 
 ---
 
+### WR-09: Cmd+Q while settings overlay is open silently swallows the quit — application cannot be quit via keyboard when settings is visible
+
+**File:** `src/app.rs:3301-3335`
+
+**Issue:** [NEW — 05-05] The settings overlay keyboard handler intercepts all key events unconditionally and returns early (line 3335: `return;`). When the user presses Cmd+Q while the settings overlay is open, the key matches `_ => {}` in the settings match block (line 3333) and the handler returns without dispatching the quit action. The application does not exit. The only way to quit is to close the settings overlay first and then press Cmd+Q, which is non-standard macOS behavior (Cmd+Q always quits regardless of modal state in native apps).
+
+This also affects the init prompt intercept (lines 3338-3354): Cmd+Q in the init prompt state is similarly swallowed.
+
+**Fix:** Before the settings/init-prompt early-return branches, add an explicit check for Cmd+Q and exit immediately:
+```rust
+// At the top of WindowEvent::KeyboardInput, before all mode checks:
+if event.state == ElementState::Pressed {
+    if let Key::Character(c) = &event.logical_key {
+        if self.modifiers.super_key() && c.as_str() == "q" {
+            // Save and quit, identical to the workspace quit handler
+            if let (Some(grid), Some(project_dir)) = (&self.grid, &self.project_dir) {
+                let config = crate::config::ProjectConfig::from_current_state(
+                    grid, &self.panels, self.terminal_manager.as_ref(),
+                    project_dir, Some(&self.theme_registry.active().name),
+                );
+                crate::config::save_project_config(project_dir, &config);
+            }
+            event_loop.exit();
+            return;
+        }
+    }
+}
+```
+
+---
+
+### WR-10: Picker-mode Cmd+Q exits without saving project config
+
+**File:** `src/app.rs:3273-3276`
+
+**Issue:** [NEW — 05-05] The picker-mode keyboard handler has a hardcoded Cmd+Q check:
+```rust
+Key::Character(c) if self.modifiers.super_key() && c.as_str() == "q" => {
+    event_loop.exit();
+    None
+}
+```
+This calls `event_loop.exit()` without saving the project config. In contrast, the workspace quit path (lines 3402-3424) and the `CloseRequested` handler (lines 2909-2924) both save config before exiting. If the user opens a project, makes changes, the picker mode is then shown (e.g., via project switch), and they quit via Cmd+Q, the unsaved layout changes are lost.
+
+Note: if the picker is shown *before* any project is open, `self.project_dir` is `None` and there is nothing to save — but if it is shown as an overlay over an active project the gap exists.
+
+**Fix:** Replace the bare `event_loop.exit()` with the same save-then-exit pattern used in the workspace quit handler:
+```rust
+Key::Character(c) if self.modifiers.super_key() && c.as_str() == "q" => {
+    if let (Some(grid), Some(project_dir)) = (&self.grid, &self.project_dir) {
+        let config = crate::config::ProjectConfig::from_current_state(
+            grid, &self.panels, self.terminal_manager.as_ref(),
+            project_dir, Some(&self.theme_registry.active().name),
+        );
+        crate::config::save_project_config(project_dir, &config);
+    }
+    event_loop.exit();
+    None
+}
+```
+
+---
+
 ## Info
 
 ### IN-01: `load_user_shortcuts` test is a no-op assertion
@@ -419,6 +484,24 @@ This is not a security issue since `validate_config` runs after load, but a sile
 
 ---
 
-_Reviewed: 2026-05-17_
+### IN-05: `InputAction::Quit` arm in `process_action` is a silent no-op — correctness depends on all callers intercepting Quit before dispatch
+
+**File:** `src/app.rs:1356-1359`
+
+**Issue:** [NEW — 05-05] The `process_action` match arm for `InputAction::Quit` is intentionally a no-op with a comment explaining it is "handled in window_event before reaching process_action." This design is correct for the current workspace keyboard dispatch (which intercepts Quit before calling `process_action`). However, any future caller of `process_action` that passes `InputAction::Quit` directly — such as a menu action handler, a test harness, or a new event source — will silently do nothing. The quit action will be consumed without error, exit, or warning. The invariant is invisible: there is no type-level or compile-time enforcement that Quit cannot reach `process_action`.
+
+**Fix:** (Low-urgency) Consider converting the arm to a debug assertion:
+```rust
+InputAction::Quit => {
+    // Should be intercepted before process_action; log if it escapes.
+    warn!("InputAction::Quit reached process_action — this is a bug");
+    debug_assert!(false, "Quit must be handled before process_action");
+}
+```
+This makes the invariant visible and catches future misuse during development.
+
+---
+
+_Reviewed: 2026-05-17 (updated for 05-05 Cmd+Q changes)_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
