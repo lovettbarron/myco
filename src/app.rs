@@ -35,6 +35,7 @@ use crate::canvas::CanvasManager;
 use crate::markdown::{MarkdownManager, MarkdownRenderer};
 use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_WIDTH};
 use crate::sidebar::renderer::SidebarRenderer;
+use crate::settings::{SettingsClickResult, SettingsRenderer, SettingsState};
 use crate::status_bar::{BottomBar, StatsBar, BOTTOM_BAR_HEIGHT, STATS_BAR_HEIGHT};
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
@@ -212,6 +213,8 @@ pub struct App {
     stats_bar: StatsBar,
     /// Bottom project info bar (git branch, dirty indicator, path).
     bottom_bar: Option<BottomBar>,
+    /// Settings overlay state (opened by Cmd+,, closed by Esc).
+    settings: SettingsState,
 }
 
 impl App {
@@ -251,6 +254,7 @@ impl App {
             scroll_pixel_accumulator: 0.0,
             stats_bar: StatsBar::new(),
             bottom_bar: None,
+            settings: SettingsState::new(),
         }
     }
 }
@@ -1169,6 +1173,27 @@ impl App {
                     }
                 }
             }
+            InputAction::OpenSettings => {
+                let theme_names: Vec<String> = self
+                    .theme_registry
+                    .available_themes()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let active_name = self.theme_registry.active().name.clone();
+                self.settings.open(theme_names, &active_name);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                info!("Settings overlay opened");
+            }
+            InputAction::CloseSettings => {
+                self.settings.close();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                info!("Settings overlay closed");
+            }
             InputAction::ThemeSwitch { theme_name } => {
                 if self.theme_registry.set_active(&theme_name) {
                     let definition = self.theme_registry.active();
@@ -1803,6 +1828,20 @@ impl App {
             });
         }
 
+        // Settings overlay (renders on top of everything except title bar/bottom bar)
+        if self.settings.visible {
+            let viewport_y = TOP_CHROME_HEIGHT;
+            let viewport_h = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+            let settings_quads = SettingsRenderer::build_quads(
+                &self.settings,
+                viewport_y,
+                viewport_h,
+                width,
+                &self.theme,
+            );
+            quads.extend(settings_quads);
+        }
+
         (quads, pill_label_buf)
     }
 
@@ -2132,6 +2171,20 @@ impl App {
             });
         }
 
+        // Settings overlay labels (renders on top)
+        if self.settings.visible {
+            let viewport_y = TOP_CHROME_HEIGHT;
+            let viewport_h = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+            let settings_labels = SettingsRenderer::build_labels(
+                &self.settings,
+                viewport_y,
+                viewport_h,
+                width,
+                &self.theme,
+            );
+            labels.extend(settings_labels);
+        }
+
         labels
     }
 }
@@ -2323,6 +2376,20 @@ impl ApplicationHandler<UserEvent> for App {
                 let lx = position.x / self.scale_factor as f64;
                 let ly = position.y / self.scale_factor as f64;
 
+                // Route cursor to settings overlay when visible
+                if self.settings.visible {
+                    let viewport_y = TOP_CHROME_HEIGHT;
+                    if self.settings.update_hover(lx as f32, ly as f32, viewport_y) {
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
+                    // Also update mouse state position for click handling
+                    self.mouse_state.cursor_x = lx;
+                    self.mouse_state.cursor_y = ly;
+                    return;
+                }
+
                 // Update sidebar hover state
                 let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
                 if sidebar_visible && (lx as f32) < SIDEBAR_WIDTH && (ly as f32) > TOP_CHROME_HEIGHT {
@@ -2365,6 +2432,27 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 // Block mouse input while init prompt is showing
                 if self.init_prompt == InitPrompt::Showing {
+                    return;
+                }
+
+                // Route mouse clicks to settings overlay when visible
+                if self.settings.visible
+                    && state == ElementState::Pressed
+                    && button == MouseButton::Left
+                {
+                    let lx = self.mouse_state.cursor_x as f32;
+                    let ly = self.mouse_state.cursor_y as f32;
+                    let viewport_y = TOP_CHROME_HEIGHT;
+                    let result = self.settings.handle_click(lx, ly, viewport_y);
+                    match result {
+                        SettingsClickResult::ThemeSelected(name) => {
+                            self.pending_actions.push(InputAction::ThemeSwitch { theme_name: name });
+                        }
+                        SettingsClickResult::SectionChanged | SettingsClickResult::Consumed => {}
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
                     return;
                 }
 
@@ -2522,6 +2610,22 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
+                // Intercept keys when settings overlay is visible
+                if self.settings.visible && event.state == ElementState::Pressed {
+                    use winit::keyboard::{Key, NamedKey};
+                    match &event.logical_key {
+                        Key::Named(NamedKey::Escape) => {
+                            self.process_action(InputAction::CloseSettings);
+                        }
+                        Key::Character(c) if self.modifiers.super_key() && c.as_str() == "," => {
+                            // Cmd+, toggles settings closed when already open
+                            self.process_action(InputAction::CloseSettings);
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+
                 // Intercept keys when the init prompt is showing
                 if self.init_prompt == InitPrompt::Showing && event.state == ElementState::Pressed {
                     use winit::keyboard::{Key, NamedKey};
