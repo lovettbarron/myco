@@ -130,6 +130,8 @@ pub enum InputAction {
     CloseSettings,
     /// Switch to a different project by path (from sidebar project switcher).
     ProjectSwitch { path: PathBuf },
+    /// Quit the application (Cmd+Q).
+    Quit,
 }
 
 /// Convert an action ID string (from the shortcut registry) to an InputAction.
@@ -153,7 +155,7 @@ pub fn action_from_id(action_id: &str, panel_id: PanelId) -> Option<InputAction>
         "font_size_up" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: 1.0 }),
         "font_size_down" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: -1.0 }),
         "toggle_fullscreen" => Some(InputAction::PanelToggleFullscreen { panel_id }),
-        "quit" => None, // Handled at app level via Cmd+Q
+        "quit" => Some(InputAction::Quit),
         _ => None,
     }
 }
