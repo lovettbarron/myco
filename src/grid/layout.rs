@@ -217,6 +217,88 @@ impl GridLayout {
     pub fn parent_of(&self, node: NodeId) -> Option<NodeId> {
         self.tree.parent(node)
     }
+
+    /// Create a grid layout from a saved configuration.
+    ///
+    /// Reconstructs the taffy tree from LayoutConfig, creating column containers
+    /// for stacked caps and leaf nodes for single caps.
+    /// Panel IDs are assigned sequentially starting from 0.
+    pub fn from_config(config: &crate::config::LayoutConfig) -> Self {
+        use crate::config::ColumnConfig;
+
+        let mut tree = TaffyTree::new();
+        let mut panels = Vec::new();
+        let mut next_id: u64 = 0;
+        let mut column_containers = HashSet::new();
+        let mut column_nodes = Vec::new();
+
+        for col in &config.columns {
+            match col {
+                ColumnConfig::Single(_cap) => {
+                    let leaf = tree.new_leaf(Style::default()).unwrap();
+                    let panel_id = PanelId(next_id);
+                    next_id += 1;
+                    panels.push((leaf, panel_id));
+                    column_nodes.push(leaf);
+                }
+                ColumnConfig::Stack { caps } => {
+                    let mut children = Vec::new();
+                    for _cap in caps {
+                        let leaf = tree.new_leaf(Style::default()).unwrap();
+                        let panel_id = PanelId(next_id);
+                        next_id += 1;
+                        panels.push((leaf, panel_id));
+                        children.push(leaf);
+                    }
+
+                    let container = tree
+                        .new_with_children(
+                            Style {
+                                display: Display::Grid,
+                                size: Size {
+                                    width: percent(1.0),
+                                    height: percent(1.0),
+                                },
+                                grid_template_columns: vec![fr(1.0)],
+                                grid_template_rows: children.iter().map(|_| fr(1.0)).collect(),
+                                ..Default::default()
+                            },
+                            &children,
+                        )
+                        .unwrap();
+
+                    column_containers.insert(container);
+                    column_nodes.push(container);
+                }
+            }
+        }
+
+        let num_columns = column_nodes.len().max(1);
+        let root = tree
+            .new_with_children(
+                Style {
+                    display: Display::Grid,
+                    size: Size {
+                        width: percent(1.0),
+                        height: percent(1.0),
+                    },
+                    grid_template_columns: (0..num_columns).map(|_| fr(1.0)).collect(),
+                    grid_template_rows: vec![fr(1.0)],
+                    ..Default::default()
+                },
+                &column_nodes,
+            )
+            .unwrap();
+
+        Self {
+            tree,
+            root,
+            panels,
+            next_id,
+            fullscreen_state: None,
+            column_containers,
+        }
+    }
 }
 
 #[cfg(test)]
