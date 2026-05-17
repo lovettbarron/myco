@@ -1,11 +1,17 @@
 //! Intervention detection: scans terminal output for patterns indicating
 //! that an AI tool or system process needs human attention (D-05).
 //!
-//! Uses plain substring matching (not regex) per research Q2 recommendation.
+//! Two-layer detection:
+//! - Layer 1: Plain substring matching for known tool prompts (Claude Code, sudo)
+//! - Layer 2: Idle-waiting heuristic for unknown tools (process sleeping + no output)
+//!
 //! Rate-limited to at most once per 2 seconds per panel.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
+
+use sysinfo::ProcessStatus;
 
 use crate::grid::panel::PanelId;
 
@@ -14,12 +20,30 @@ use super::patterns::PatternConfig;
 /// Minimum interval between scans for the same panel (rate limit).
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Duration of no output before idle heuristic fires (D-05: >5 seconds).
+const IDLE_THRESHOLD: Duration = Duration::from_secs(5);
+
+/// Pattern ID used by the idle heuristic (distinct from named patterns).
+pub const IDLE_HEURISTIC_PATTERN_ID: &str = "__idle_heuristic";
+
+/// Tracks per-panel idle state for the two-layer detection heuristic.
+struct IdleState {
+    /// Last time we saw new output (text changed from previous scan).
+    last_output_change: Instant,
+    /// Previous text hash to detect output changes.
+    last_text_hash: u64,
+    /// Whether we already fired an idle alert for this idle period.
+    idle_alert_fired: bool,
+}
+
 /// Detects intervention-requiring patterns in terminal output.
 pub struct InterventionDetector {
     /// Loaded pattern configuration.
     pub(crate) patterns: PatternConfig,
     /// Last scan time per panel (for rate limiting).
     last_scan: HashMap<PanelId, Instant>,
+    /// Per-panel idle state for Layer 2 detection.
+    idle_states: HashMap<PanelId, IdleState>,
 }
 
 impl InterventionDetector {
@@ -28,6 +52,7 @@ impl InterventionDetector {
         Self {
             patterns: PatternConfig::load(),
             last_scan: HashMap::new(),
+            idle_states: HashMap::new(),
         }
     }
 
@@ -78,6 +103,74 @@ impl InterventionDetector {
     /// Record that a panel was just scanned (for rate limiting).
     pub fn mark_scanned(&mut self, panel_id: PanelId) {
         self.last_scan.insert(panel_id, Instant::now());
+    }
+
+    /// Check if a panel's process appears to be idle-waiting for input (Layer 2).
+    ///
+    /// Returns `Some((pattern_id, tool_name))` if the heuristic triggers.
+    ///
+    /// Conditions (ALL must be true):
+    /// 1. Process status is Sleep or Idle (from sysinfo)
+    /// 2. No PTY output change for >5 seconds (text hash unchanged)
+    /// 3. Terminal's last non-empty line exists (something is displayed)
+    /// 4. We haven't already fired an idle alert for this idle period
+    pub fn check_idle_heuristic(
+        &mut self,
+        panel_id: PanelId,
+        text: &str,
+        process_status: Option<ProcessStatus>,
+    ) -> Option<(String, String)> {
+        let text_hash = Self::hash_text(text);
+
+        let idle_state = self.idle_states.entry(panel_id).or_insert(IdleState {
+            last_output_change: Instant::now(),
+            last_text_hash: text_hash,
+            idle_alert_fired: false,
+        });
+
+        // Check if text changed -- reset idle timer
+        if text_hash != idle_state.last_text_hash {
+            idle_state.last_text_hash = text_hash;
+            idle_state.last_output_change = Instant::now();
+            idle_state.idle_alert_fired = false;
+            return None;
+        }
+
+        // Already alerted for this idle period
+        if idle_state.idle_alert_fired {
+            return None;
+        }
+
+        // Check idle duration (>5 seconds without output change)
+        if idle_state.last_output_change.elapsed() < IDLE_THRESHOLD {
+            return None;
+        }
+
+        // Check process status -- must be Sleep or Idle
+        match process_status {
+            Some(ProcessStatus::Sleep) | Some(ProcessStatus::Idle) => {}
+            _ => return None, // Process is running/busy, not waiting for input
+        }
+
+        // Check that the last non-empty line exists (something is displayed)
+        let has_visible_prompt = text
+            .lines()
+            .rev()
+            .any(|line| !line.trim().is_empty());
+        if !has_visible_prompt {
+            return None;
+        }
+
+        // All conditions met -- fire idle heuristic alert
+        idle_state.idle_alert_fired = true;
+        Some((IDLE_HEURISTIC_PATTERN_ID.to_string(), "Process".to_string()))
+    }
+
+    /// Compute a hash of terminal text for change detection.
+    fn hash_text(text: &str) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -191,5 +284,92 @@ mod tests {
         // After marking scanned, should not be scannable immediately
         detector.mark_scanned(panel);
         assert!(!detector.should_scan(&panel));
+    }
+
+    #[test]
+    fn test_idle_heuristic_fires_after_5s() {
+        let mut detector = InterventionDetector::new();
+        let panel = make_panel_id(10);
+        let text = "$ cat\nwaiting for input...\n";
+
+        // First call initializes idle state, should not fire (< 5s)
+        let result = detector.check_idle_heuristic(panel, text, Some(ProcessStatus::Sleep));
+        assert!(result.is_none(), "should not fire immediately");
+
+        // Manually adjust last_output_change to 6 seconds ago
+        if let Some(state) = detector.idle_states.get_mut(&panel) {
+            state.last_output_change = Instant::now() - Duration::from_secs(6);
+        }
+
+        // Now it should fire (same text, >5s, Sleep status)
+        let result = detector.check_idle_heuristic(panel, text, Some(ProcessStatus::Sleep));
+        assert!(result.is_some(), "should fire after 5s idle");
+        let (pid, tool) = result.unwrap();
+        assert_eq!(pid, "__idle_heuristic");
+        assert_eq!(tool, "Process");
+    }
+
+    #[test]
+    fn test_idle_heuristic_resets_on_new_output() {
+        let mut detector = InterventionDetector::new();
+        let panel = make_panel_id(11);
+        let text1 = "waiting...\n";
+
+        // Initialize and age the idle state
+        detector.check_idle_heuristic(panel, text1, Some(ProcessStatus::Sleep));
+        if let Some(state) = detector.idle_states.get_mut(&panel) {
+            state.last_output_change = Instant::now() - Duration::from_secs(6);
+        }
+
+        // Fire the alert
+        let result = detector.check_idle_heuristic(panel, text1, Some(ProcessStatus::Sleep));
+        assert!(result.is_some(), "should fire");
+
+        // New output resets the idle state
+        let text2 = "new output arrived!\n";
+        let result = detector.check_idle_heuristic(panel, text2, Some(ProcessStatus::Sleep));
+        assert!(result.is_none(), "should reset on new output");
+
+        // Verify idle_alert_fired was reset
+        let state = detector.idle_states.get(&panel).unwrap();
+        assert!(!state.idle_alert_fired, "idle_alert_fired should be reset");
+    }
+
+    #[test]
+    fn test_idle_heuristic_requires_sleep_status() {
+        let mut detector = InterventionDetector::new();
+        let panel = make_panel_id(12);
+        let text = "running process output\n";
+
+        // Initialize and age the idle state
+        detector.check_idle_heuristic(panel, text, Some(ProcessStatus::Run));
+        if let Some(state) = detector.idle_states.get_mut(&panel) {
+            state.last_output_change = Instant::now() - Duration::from_secs(6);
+        }
+
+        // Should NOT fire because process status is Run, not Sleep/Idle
+        let result = detector.check_idle_heuristic(panel, text, Some(ProcessStatus::Run));
+        assert!(result.is_none(), "should not fire for running process");
+    }
+
+    #[test]
+    fn test_idle_heuristic_no_double_alert() {
+        let mut detector = InterventionDetector::new();
+        let panel = make_panel_id(13);
+        let text = "prompt> \n";
+
+        // Initialize and age
+        detector.check_idle_heuristic(panel, text, Some(ProcessStatus::Sleep));
+        if let Some(state) = detector.idle_states.get_mut(&panel) {
+            state.last_output_change = Instant::now() - Duration::from_secs(6);
+        }
+
+        // First alert fires
+        let result = detector.check_idle_heuristic(panel, text, Some(ProcessStatus::Sleep));
+        assert!(result.is_some(), "first alert should fire");
+
+        // Second call with same conditions should NOT fire (no double alert)
+        let result = detector.check_idle_heuristic(panel, text, Some(ProcessStatus::Sleep));
+        assert!(result.is_none(), "should not double-alert");
     }
 }

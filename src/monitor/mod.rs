@@ -207,6 +207,29 @@ impl ResourceMonitor {
                                     return;
                                 }
                             }
+                        } else {
+                            // Layer 2: Idle-waiting heuristic (fallback for unknown tools)
+                            // Only check if NO pattern matched (avoid double-alerting)
+                            let process_status = current_input.pids.iter()
+                                .find(|(pid_panel_id, _)| *pid_panel_id == *panel_id)
+                                .and_then(|(_, pid)| system.process(Pid::from_u32(*pid)))
+                                .map(|p| p.status());
+
+                            if let Some((pattern_id, tool_name)) =
+                                intervention_detector.check_idle_heuristic(*panel_id, text, process_status)
+                            {
+                                let message = format!("{} may need attention", tool_name);
+                                let alert = InterventionAlert {
+                                    panel_id: *panel_id,
+                                    pattern_id,
+                                    tool_name,
+                                    message,
+                                };
+                                if proxy.send_event(UserEvent::InterventionAlert(alert)).is_err() {
+                                    debug!("Resource monitor: event loop closed, exiting");
+                                    return;
+                                }
+                            }
                         }
 
                         intervention_detector.mark_scanned(*panel_id);
