@@ -130,6 +130,14 @@ pub enum InputAction {
     CloseSettings,
     /// Switch to a different project by path (from sidebar project switcher).
     ProjectSwitch { path: PathBuf },
+    /// Freeze a panel's underlying process (SIGSTOP for terminal, set_visible(false) for webview).
+    FreezePanel { panel_id: PanelId },
+    /// Unfreeze a panel's underlying process (SIGCONT for terminal, set_visible(true) for webview).
+    UnfreezePanel { panel_id: PanelId },
+    /// Dismiss a toast notification (explicit user action, triggers suppression for interventions).
+    DismissToast { toast_id: u64 },
+    /// Click action on a toast (e.g. "Focus Panel").
+    ToastAction { toast_id: u64 },
     /// Quit the application (Cmd+Q).
     Quit,
 }

@@ -161,6 +161,45 @@ impl ResourceMonitor {
     }
 }
 
+/// Freeze a process and its entire group via SIGSTOP.
+///
+/// Only call with PIDs captured at terminal creation time (T-06-02 security constraint).
+/// Returns Ok(()) on success, Err on failure (ESRCH if process already exited).
+pub fn freeze_process_group(child_pid: u32) -> Result<(), std::io::Error> {
+    use libc::{pid_t, SIGSTOP};
+    let pid = child_pid as pid_t;
+    let pgid = unsafe { libc::getpgid(pid) };
+    if pgid == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // Negative PID = send to entire process group
+    let result = unsafe { libc::kill(-pgid, SIGSTOP) };
+    if result == -1 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Unfreeze a process group via SIGCONT.
+///
+/// Only call with PIDs captured at terminal creation time (T-06-02 security constraint).
+/// Returns Ok(()) on success, Err on failure (ESRCH if process already exited).
+pub fn unfreeze_process_group(child_pid: u32) -> Result<(), std::io::Error> {
+    use libc::{pid_t, SIGCONT};
+    let pid = child_pid as pid_t;
+    let pgid = unsafe { libc::getpgid(pid) };
+    if pgid == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let result = unsafe { libc::kill(-pgid, SIGCONT) };
+    if result == -1 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 /// Determine the resource dot color based on CPU percentage (D-01).
 ///
 /// - Green (theme.success): CPU < 50%
@@ -222,5 +261,51 @@ mod tests {
         let state = ResourceState::default();
         assert_eq!(state.cpu_percent, 0.0);
         assert_eq!(state.memory_bytes, 0);
+    }
+
+    #[test]
+    fn test_freeze_and_unfreeze_signal() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+
+        // Spawn a sleep child process in its own process group (setsid)
+        // so that SIGSTOP doesn't freeze the test runner.
+        let mut child = unsafe {
+            Command::new("sleep")
+                .arg("60")
+                .pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                })
+                .spawn()
+                .expect("failed to spawn sleep process")
+        };
+
+        let child_pid = child.id();
+
+        // Freeze should succeed
+        let freeze_result = freeze_process_group(child_pid);
+        assert!(freeze_result.is_ok(), "freeze should succeed: {:?}", freeze_result);
+
+        // Unfreeze should succeed
+        let unfreeze_result = unfreeze_process_group(child_pid);
+        assert!(unfreeze_result.is_ok(), "unfreeze should succeed: {:?}", unfreeze_result);
+
+        // Clean up
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn test_freeze_exited_process() {
+        // Use a PID that almost certainly doesn't exist
+        let result = freeze_process_group(999_999);
+        assert!(result.is_err(), "freeze on non-existent PID should fail");
+    }
+
+    #[test]
+    fn test_unfreeze_exited_process() {
+        let result = unfreeze_process_group(999_999);
+        assert!(result.is_err(), "unfreeze on non-existent PID should fail");
     }
 }

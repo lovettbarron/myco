@@ -1384,6 +1384,18 @@ impl App {
                 // Open new project
                 self.open_project(path);
             }
+            InputAction::FreezePanel { .. } => {
+                // Implemented in Task 2 of Plan 06-02.
+            }
+            InputAction::UnfreezePanel { .. } => {
+                // Implemented in Task 2 of Plan 06-02.
+            }
+            InputAction::DismissToast { .. } => {
+                // Toast dismissal (future plan).
+            }
+            InputAction::ToastAction { .. } => {
+                // Toast action handling (future plan).
+            }
             InputAction::Quit => {
                 // Handled in window_event before reaching process_action.
                 // This arm exists only for exhaustive match coverage.
