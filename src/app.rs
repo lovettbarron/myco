@@ -1216,7 +1216,43 @@ impl App {
                     .map(|s| s.to_string())
                     .collect();
                 let active_name = self.theme_registry.active().name.clone();
-                self.settings.open(theme_names, &active_name);
+
+                // Get project info for the Project section
+                let project_name = self
+                    .project_dir
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Untitled".to_string());
+                let project_path = self
+                    .project_dir
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                let project_description = self
+                    .project_dir
+                    .as_ref()
+                    .and_then(|p| {
+                        let config = crate::config::load_project_config(p)?;
+                        config.metadata.description
+                    })
+                    .unwrap_or_default();
+                let project_theme = self
+                    .project_dir
+                    .as_ref()
+                    .and_then(|p| {
+                        let config = crate::config::load_project_config(p)?;
+                        config.theme
+                    });
+
+                self.settings.open_with_project(
+                    theme_names,
+                    &active_name,
+                    project_name,
+                    project_path,
+                    project_description,
+                    project_theme.as_deref(),
+                );
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -1409,6 +1445,33 @@ impl App {
         let content_w = w - PANEL_CONTENT_PADDING * 2.0;
         let content_h = h - PANEL_TITLE_HEIGHT;
         Some((content_x, content_y, content_w, content_h))
+    }
+
+    /// Save shortcut overrides to disk.
+    ///
+    /// Computes the sparse set of overrides by comparing current registry
+    /// bindings against defaults, and writes only changed bindings to
+    /// ~/.myco/shortcuts.json (D-18).
+    fn save_shortcut_overrides(&self) {
+        let defaults = crate::shortcuts::defaults::default_shortcuts();
+        let mut overrides = Vec::new();
+        for (action_id, keys) in self.shortcut_registry.all_bindings() {
+            let keys_str: Vec<String> = keys
+                .iter()
+                .map(|k| crate::shortcuts::chord::key_combo_to_string(k))
+                .collect();
+            let default_binding = defaults.iter().find(|d| d.action == action_id);
+            let is_default = default_binding
+                .map(|d| d.keys == keys_str)
+                .unwrap_or(false);
+            if !is_default {
+                overrides.push(crate::shortcuts::ShortcutEntry {
+                    action: action_id.to_string(),
+                    keys: keys_str,
+                });
+            }
+        }
+        crate::shortcuts::serialization::save_user_shortcuts(&overrides);
     }
 
     /// Get the sidebar x offset (SIDEBAR_WIDTH when visible, 0 when hidden).
@@ -2474,6 +2537,16 @@ impl App {
                 &self.theme,
             );
             labels.extend(settings_labels);
+
+            // Shortcut badge labels (with actual binding data from registry)
+            let badge_labels = SettingsRenderer::build_shortcuts_badge_labels(
+                &self.settings,
+                viewport_y,
+                width,
+                &self.theme,
+                &self.shortcut_registry,
+            );
+            labels.extend(badge_labels);
         }
 
         labels
@@ -2976,12 +3049,40 @@ impl ApplicationHandler<UserEvent> for App {
                     let lx = self.mouse_state.cursor_x as f32;
                     let ly = self.mouse_state.cursor_y as f32;
                     let viewport_y = TOP_CHROME_HEIGHT;
+
+                    // Check toast Undo click first (overlays on top)
+                    if let Some(window) = &self.window {
+                        let size = window.inner_size();
+                        let width = size.width as f32 / self.scale_factor;
+                        let height = size.height as f32 / self.scale_factor;
+                        let viewport_h = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+                        if self.settings.toast_undo_at(lx, ly, viewport_y, viewport_h, width) {
+                            self.settings.handle_undo(&mut self.shortcut_registry);
+                            self.save_shortcut_overrides();
+                            window.request_redraw();
+                            return;
+                        }
+                    }
+
                     let result = self.settings.handle_click(lx, ly, viewport_y);
                     match result {
                         SettingsClickResult::ThemeSelected(name) => {
                             self.pending_actions.push(InputAction::ThemeSwitch { theme_name: name });
                         }
-                        SettingsClickResult::SectionChanged | SettingsClickResult::Consumed => {}
+                        SettingsClickResult::ProjectThemeChanged(theme_opt) => {
+                            // Apply project theme override and mark for auto-save
+                            if let Some(ref name) = theme_opt {
+                                self.pending_actions.push(InputAction::ThemeSwitch { theme_name: name.clone() });
+                            } else {
+                                // Revert to global default theme
+                                let global_prefs = crate::config::global::load_global_preferences();
+                                self.pending_actions.push(InputAction::ThemeSwitch { theme_name: global_prefs.default_theme });
+                            }
+                            self.auto_save.mark_dirty();
+                        }
+                        SettingsClickResult::ShortcutRecordingStarted
+                        | SettingsClickResult::SectionChanged
+                        | SettingsClickResult::Consumed => {}
                     }
                     if let Some(window) = &self.window {
                         window.request_redraw();
@@ -3195,6 +3296,28 @@ impl ApplicationHandler<UserEvent> for App {
                 // Intercept keys when settings overlay is visible
                 if self.settings.visible && event.state == ElementState::Pressed {
                     use winit::keyboard::{Key, NamedKey};
+
+                    // If recording mode is active, route key to recording state machine
+                    if self.settings.recording.is_recording() {
+                        if let Some(combo) = crate::shortcuts::chord::key_combo_from_event(&event, &self.modifiers) {
+                            let result = self.settings.feed_recording_key(combo, &mut self.shortcut_registry);
+                            if let Some(ref r) = result {
+                                match r {
+                                    crate::settings::SettingsShortcutResult::Bound { .. }
+                                    | crate::settings::SettingsShortcutResult::Cleared => {
+                                        self.save_shortcut_overrides();
+                                    }
+                                    crate::settings::SettingsShortcutResult::Cancelled => {}
+                                }
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // Normal settings key handling (not recording)
                     match &event.logical_key {
                         Key::Named(NamedKey::Escape) => {
                             self.process_action(InputAction::CloseSettings);
@@ -3619,14 +3742,37 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        // Reset stale chord state (D-15: 500ms timeout between chord keys)
+        self.chord_state.check_timeout();
+
+        // Settings recording timeout and toast expiry (D-14, D-16)
+        if self.settings.visible {
+            if let Some(ref result) = self.settings.check_recording_timeout(&mut self.shortcut_registry) {
+                match result {
+                    crate::settings::SettingsShortcutResult::Bound { .. }
+                    | crate::settings::SettingsShortcutResult::Cleared => {
+                        self.save_shortcut_overrides();
+                    }
+                    crate::settings::SettingsShortcutResult::Cancelled => {}
+                }
+                needs_render = true;
+            }
+            let prev_toast_count = self.settings.toasts.len();
+            self.settings.tick_toasts();
+            if self.settings.toasts.len() != prev_toast_count {
+                needs_render = true;
+            }
+            // Recording mode needs periodic redraws for visual pulsing
+            if self.settings.recording.is_recording() {
+                needs_render = true;
+            }
+        }
+
         if needs_render {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
         }
-
-        // Reset stale chord state (D-15: 500ms timeout between chord keys)
-        self.chord_state.check_timeout();
 
         // Auto-save config if dirty and debounce elapsed (D-07, D-08)
         if self.auto_save.should_save() {
