@@ -1,5 +1,6 @@
 mod app;
 mod canvas;
+mod cap;
 mod context;
 mod grid;
 mod input;
