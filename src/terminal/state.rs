@@ -100,6 +100,9 @@ pub struct TerminalState {
     /// Current working directory as reported by shell title (OSC 2).
     pub current_title: Option<String>,
 
+    /// Child process PID (captured at creation time for resource monitoring, T-06-02).
+    pub child_pid: Option<u32>,
+
     /// Cached git info (branch, optional stats). Refreshed periodically.
     cached_git_info: Option<(String, Option<(usize, usize, usize)>)>,
     /// Last time git info was refreshed.
@@ -156,6 +159,10 @@ impl TerminalState {
 
         let pty = tty::new(&pty_config, window_size, 0)?;
 
+        // Capture child PID before pty is consumed by EventLoop (T-06-02).
+        // Only signal PIDs we ourselves spawned.
+        let child_pid = Some(pty.child().id());
+
         // Create and spawn the background event loop
         let listener_handle = event_listener.clone();
         let event_loop = EventLoop::new(
@@ -192,6 +199,7 @@ impl TerminalState {
             event_listener: listener_handle,
             working_dir: working_dir.to_path_buf(),
             current_title: None,
+            child_pid,
             cached_git_info: None,
             git_info_last_refresh: Instant::now() - Duration::from_secs(60),
         })

@@ -22,6 +22,7 @@ pub enum UserEvent {
     TerminalEvent,
     FileChanged(Vec<std::path::PathBuf>),
     CanvasMessage(PanelId, String),
+    ResourceUpdate(Vec<crate::monitor::ResourceUpdate>),
     #[cfg(target_os = "macos")]
     MenuAction(u32),
 }
@@ -2566,6 +2567,9 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::TerminalEvent => {}
             UserEvent::CanvasMessage(panel_id, msg) => {
                 self.process_action(InputAction::CanvasIpcMessage { panel_id, message: msg });
+            }
+            UserEvent::ResourceUpdate(_updates) => {
+                // Resource updates will be wired in Task 2
             }
             UserEvent::FileChanged(paths) => {
                 if let Some(mm) = &mut self.markdown_manager {
