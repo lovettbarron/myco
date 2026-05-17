@@ -15,6 +15,8 @@ mod sidebar;
 mod status_bar;
 mod terminal;
 mod theme;
+mod monitor;
+mod toast;
 mod watcher;
 mod window;
 

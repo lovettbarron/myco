@@ -41,6 +41,10 @@ pub struct Panel {
     pub file_path: Option<PathBuf>,
     /// Optional canvas identifier (used as filename without .tldr extension).
     pub canvas_id: Option<String>,
+    /// Whether this panel's process is frozen (paused).
+    pub frozen: bool,
+    /// Child process PID (for terminal panels, used by resource monitoring).
+    pub child_pid: Option<u32>,
 }
 
 impl Panel {
@@ -52,6 +56,8 @@ impl Panel {
             title: "Placeholder".into(),
             file_path: None,
             canvas_id: None,
+            frozen: false,
+            child_pid: None,
         }
     }
 
@@ -63,6 +69,8 @@ impl Panel {
             title: "Terminal".into(),
             file_path: None,
             canvas_id: None,
+            frozen: false,
+            child_pid: None,
         }
     }
 
@@ -75,6 +83,8 @@ impl Panel {
             title,
             file_path: None,
             canvas_id: Some(canvas_id),
+            frozen: false,
+            child_pid: None,
         }
     }
 
@@ -90,6 +100,8 @@ impl Panel {
             title,
             file_path: Some(path),
             canvas_id: None,
+            frozen: false,
+            child_pid: None,
         }
     }
 }

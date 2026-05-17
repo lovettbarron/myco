@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -22,6 +22,7 @@ pub enum UserEvent {
     TerminalEvent,
     FileChanged(Vec<std::path::PathBuf>),
     CanvasMessage(PanelId, String),
+    ResourceUpdate(Vec<crate::monitor::ResourceUpdate>),
     #[cfg(target_os = "macos")]
     MenuAction(u32),
 }
@@ -76,6 +77,22 @@ const PANEL_TITLE_HEIGHT: f32 = 28.0;
 
 /// Horizontal padding inside panel content areas (e.g. terminal text inset from panel edge).
 const PANEL_CONTENT_PADDING: f32 = 8.0;
+
+/// State for a resource dot tooltip (shown on hover after 300ms).
+struct TooltipState {
+    /// Panel whose resource dot is hovered.
+    panel_id: PanelId,
+    /// CPU percentage to display.
+    cpu_percent: f32,
+    /// Memory in bytes to display.
+    memory_bytes: u64,
+    /// Tooltip position (x).
+    x: f32,
+    /// Tooltip position (y).
+    y: f32,
+    /// When hovering began.
+    hover_start: Instant,
+}
 
 enum AutocompleteAction {
     None,
@@ -239,6 +256,14 @@ pub struct App {
     picker_state: Option<PickerState>,
     /// Project registry (persists across picker and workspace).
     project_registry: ProjectRegistry,
+    /// Resource monitor for per-process CPU/RAM polling.
+    resource_monitor: Option<crate::monitor::ResourceMonitor>,
+    /// Current resource state per PID.
+    resource_states: HashMap<u32, crate::monitor::ResourceState>,
+    /// Unified toast notification manager.
+    toast_manager: crate::toast::ToastManager,
+    /// Tooltip state for resource dot hover.
+    tooltip_state: Option<TooltipState>,
 }
 
 impl App {
@@ -285,6 +310,10 @@ impl App {
             app_state: AppState::Picker,
             picker_state: None,
             project_registry: ProjectRegistry::new(),
+            resource_monitor: None,
+            resource_states: HashMap::new(),
+            toast_manager: crate::toast::ToastManager::new(),
+            tooltip_state: None,
         }
     }
 }
@@ -382,6 +411,7 @@ impl App {
                                 grid.panel_nodes().first().map(|(_, id)| *id);
                         }
                         self.recompute_layout();
+                        self.sync_child_pids();
                         self.auto_save.mark_dirty();
                     }
                 }
@@ -727,6 +757,7 @@ impl App {
                                     }
                                 }
                             }
+                            self.sync_child_pids();
                             self.auto_save.mark_dirty();
                         }
                     }
@@ -1691,6 +1722,15 @@ impl App {
         self.terminal_manager = Some(tm);
         self.grid = Some(grid);
 
+        // Initialize resource monitor for process health tracking (D-01, D-03)
+        if self.resource_monitor.is_none() {
+            if let Some(proxy) = &self.proxy {
+                self.resource_monitor = Some(crate::monitor::ResourceMonitor::new(proxy.clone()));
+                trace!("Resource monitor started");
+            }
+        }
+        self.sync_child_pids();
+
         info!("Workspace initialized for project: {:?}", project_path);
     }
 
@@ -1787,6 +1827,99 @@ impl App {
                         alacritty_terminal::event_loop::Msg::Resize(window_size),
                     );
                 }
+            }
+        }
+    }
+
+    /// Sync child PIDs from terminal states to panels and update resource monitor tracking.
+    fn sync_child_pids(&mut self) {
+        if let Some(tm) = &self.terminal_manager {
+            let mut all_pids = Vec::new();
+            for panel in &mut self.panels {
+                if panel.panel_type == PanelType::Terminal {
+                    if let Some(ts) = tm.get(&panel.id) {
+                        panel.child_pid = ts.child_pid;
+                        if let Some(pid) = ts.child_pid {
+                            all_pids.push(pid);
+                        }
+                    }
+                }
+            }
+            if let Some(monitor) = &self.resource_monitor {
+                monitor.update_tracked_pids(all_pids);
+            }
+        }
+    }
+
+    /// Update resource dot tooltip state based on cursor position.
+    fn update_tooltip_state(&mut self, lx: f32, ly: f32) {
+        let grid = match &self.grid {
+            Some(g) => g,
+            None => {
+                self.tooltip_state = None;
+                return;
+            }
+        };
+        let sidebar_offset = self.sidebar_offset();
+
+        for &(node, panel_id) in grid.panel_nodes() {
+            let (px, py, pw, _ph) = grid.get_panel_rect(node);
+            let px = px + sidebar_offset;
+            let py_offset = py + TOP_CHROME_HEIGHT;
+
+            // Resource dot position: same as build_quads
+            let close_x = px + pw - 40.0;
+            let dot_x = close_x - 24.0;
+            let dot_y = py_offset + 10.0;
+
+            // Hit test: 8x8 dot with 4px margin
+            if lx >= dot_x - 4.0
+                && lx <= dot_x + 12.0
+                && ly >= dot_y - 4.0
+                && ly <= dot_y + 12.0
+            {
+                if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
+                    if let Some(pid) = panel.child_pid {
+                        if let Some(state) = self.resource_states.get(&pid) {
+                            // Keep existing tooltip if same panel (preserve hover_start)
+                            if self
+                                .tooltip_state
+                                .as_ref()
+                                .map(|t| t.panel_id == panel_id)
+                                .unwrap_or(false)
+                            {
+                                // Update position and values
+                                if let Some(ref mut tooltip) = self.tooltip_state {
+                                    tooltip.cpu_percent = state.cpu_percent;
+                                    tooltip.memory_bytes = state.memory_bytes;
+                                    tooltip.x = dot_x - 80.0;
+                                    tooltip.y = dot_y + 16.0;
+                                }
+                            } else {
+                                self.tooltip_state = Some(TooltipState {
+                                    panel_id,
+                                    cpu_percent: state.cpu_percent,
+                                    memory_bytes: state.memory_bytes,
+                                    x: dot_x - 80.0,
+                                    y: dot_y + 16.0,
+                                    hover_start: Instant::now(),
+                                });
+                            }
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // No dot hovered -- clear tooltip
+        if self.tooltip_state.is_some() {
+            self.tooltip_state = None;
+            if let Some(window) = &self.window {
+                window.request_redraw();
             }
         }
     }
@@ -1891,6 +2024,28 @@ impl App {
                 corner_radius: 2.0,
                 _padding: 0.0,
             });
+
+            // Resource health dot (D-01): 8x8 circle in panel header
+            if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
+                let dot_color = if let Some(pid) = panel.child_pid {
+                    if let Some(state) = self.resource_states.get(&pid) {
+                        crate::monitor::dot_color(state.cpu_percent, &self.theme)
+                    } else {
+                        self.theme.fg_secondary
+                    }
+                } else {
+                    self.theme.fg_secondary
+                };
+                let dot_x = close_x - 24.0;
+                let dot_y = py_offset + 10.0;
+                quads.push(QuadInstance {
+                    position: [dot_x, dot_y],
+                    size: [8.0, 8.0],
+                    color: dot_color,
+                    corner_radius: 4.0,
+                    _padding: 0.0,
+                });
+            }
 
             // Focused panel indicator
             if self.focused_panel == Some(panel_id) {
@@ -2198,6 +2353,37 @@ impl App {
                 &self.theme,
             );
             quads.extend(settings_quads);
+        }
+
+        // Toast notification quads (bottom-right stack, renders on top of panels)
+        crate::toast::renderer::build_toast_quads(
+            &self.toast_manager,
+            width,
+            height,
+            &self.theme,
+            &mut quads,
+        );
+
+        // Tooltip quad (resource dot hover)
+        if let Some(ref tooltip) = self.tooltip_state {
+            if tooltip.hover_start.elapsed() >= Duration::from_millis(300) {
+                // Tooltip background
+                quads.push(QuadInstance {
+                    position: [tooltip.x, tooltip.y],
+                    size: [160.0, 52.0],
+                    color: self.theme.bg_secondary,
+                    corner_radius: 4.0,
+                    _padding: 0.0,
+                });
+                // Tooltip border
+                quads.push(QuadInstance {
+                    position: [tooltip.x, tooltip.y],
+                    size: [160.0, 1.0],
+                    color: self.theme.border,
+                    corner_radius: 0.0,
+                    _padding: 0.0,
+                });
+            }
         }
 
         (quads, pill_label_buf)
@@ -2529,6 +2715,46 @@ impl App {
             });
         }
 
+        // Toast notification labels (bottom-right stack)
+        crate::toast::renderer::build_toast_labels(
+            &self.toast_manager,
+            width,
+            height,
+            &self.theme,
+            &mut labels,
+        );
+
+        // Tooltip labels (resource dot hover)
+        if let Some(ref tooltip) = self.tooltip_state {
+            if tooltip.hover_start.elapsed() >= Duration::from_millis(300) {
+                let fg_primary = glyphon::Color::rgba(
+                    linear_to_srgb_u8(self.theme.fg_primary[0]),
+                    linear_to_srgb_u8(self.theme.fg_primary[1]),
+                    linear_to_srgb_u8(self.theme.fg_primary[2]),
+                    255,
+                );
+                labels.push(TextLabel {
+                    text: format!("CPU: {:.1}%", tooltip.cpu_percent),
+                    x: tooltip.x + 12.0,
+                    y: tooltip.y + 8.0,
+                    width: 136.0,
+                    height: 18.0,
+                    font_size: 13.0,
+                    color: fg_primary,
+                });
+                let mem_mb = tooltip.memory_bytes as f64 / 1_048_576.0;
+                labels.push(TextLabel {
+                    text: format!("RAM: {:.1} MB", mem_mb),
+                    x: tooltip.x + 12.0,
+                    y: tooltip.y + 28.0,
+                    width: 136.0,
+                    height: 18.0,
+                    font_size: 13.0,
+                    color: fg_primary,
+                });
+            }
+        }
+
         // Settings overlay labels (renders on top)
         if self.settings.visible {
             let viewport_y = TOP_CHROME_HEIGHT;
@@ -2566,6 +2792,18 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::TerminalEvent => {}
             UserEvent::CanvasMessage(panel_id, msg) => {
                 self.process_action(InputAction::CanvasIpcMessage { panel_id, message: msg });
+            }
+            UserEvent::ResourceUpdate(updates) => {
+                for update in updates {
+                    self.resource_states.insert(
+                        update.pid,
+                        crate::monitor::ResourceState {
+                            cpu_percent: update.cpu_percent,
+                            memory_bytes: update.memory_bytes,
+                            last_updated: Instant::now(),
+                        },
+                    );
+                }
             }
             UserEvent::FileChanged(paths) => {
                 if let Some(mm) = &mut self.markdown_manager {
@@ -2876,6 +3114,15 @@ impl ApplicationHandler<UserEvent> for App {
         self.renderer = Some(renderer);
         self.grid = Some(grid);
 
+        // Initialize resource monitor for process health tracking (D-01, D-03)
+        if self.resource_monitor.is_none() {
+            if let Some(proxy) = &self.proxy {
+                self.resource_monitor = Some(crate::monitor::ResourceMonitor::new(proxy.clone()));
+                trace!("Resource monitor started");
+            }
+        }
+        self.sync_child_pids();
+
         // Set up native menu bar
         #[cfg(target_os = "macos")]
         {
@@ -3001,6 +3248,9 @@ impl ApplicationHandler<UserEvent> for App {
                         self.process_action(action);
                     }
                 }
+
+                // Resource dot tooltip hover tracking (D-02)
+                self.update_tooltip_state(lx as f32, ly as f32);
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
@@ -3310,6 +3560,18 @@ impl ApplicationHandler<UserEvent> for App {
                                     crate::settings::SettingsShortcutResult::Bound { .. }
                                     | crate::settings::SettingsShortcutResult::Cleared => {
                                         self.save_shortcut_overrides();
+                                        // Mirror settings conflict toast to shared toast system
+                                        if let Some(toast) = self.settings.toasts.last() {
+                                            self.toast_manager.add(
+                                                crate::toast::ToastType::Conflict,
+                                                toast.message.clone(),
+                                                None,
+                                                None,
+                                                None,
+                                                Some("Undo".to_string()),
+                                                crate::toast::INFO_TOAST_DURATION,
+                                            );
+                                        }
                                     }
                                     crate::settings::SettingsShortcutResult::Cancelled => {}
                                 }
@@ -3791,6 +4053,24 @@ impl ApplicationHandler<UserEvent> for App {
             }
             // Recording mode needs periodic redraws for visual pulsing
             if self.settings.recording.is_recording() {
+                needs_render = true;
+            }
+        }
+
+        // Unified toast manager tick (expire old toasts)
+        {
+            let prev_count = self.toast_manager.count();
+            self.toast_manager.tick();
+            if self.toast_manager.count() != prev_count {
+                needs_render = true;
+            }
+        }
+
+        // Tooltip redraw (for delayed appearance)
+        if let Some(ref tooltip) = self.tooltip_state {
+            if tooltip.hover_start.elapsed() >= Duration::from_millis(300)
+                && tooltip.hover_start.elapsed() < Duration::from_millis(350)
+            {
                 needs_render = true;
             }
         }

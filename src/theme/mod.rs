@@ -53,6 +53,8 @@ pub struct Theme {
     pub success: [f32; 4],
     /// Warning color (e.g. dirty git state, attention states).
     pub warning: [f32; 4],
+    /// Error/destructive color (red tones, high CPU, error toasts).
+    pub error: [f32; 4],
     /// Secondary background (stats bar background, bottom bar, elevated surfaces).
     pub bg_secondary: [f32; 4],
     /// Secondary foreground (muted text, labels).
@@ -76,6 +78,7 @@ impl Theme {
         let accent = hex_to_linear(&def.base.accent);
         let success = hex_to_linear(&def.base.success);
         let warning = hex_to_linear(&def.base.warning);
+        let error = hex_to_linear(&def.base.error);
         let border = hex_to_linear(&def.base.border);
 
         // Darkened bg_primary for code block backgrounds (multiply sRGB by 0.85 before conversion)
@@ -105,6 +108,7 @@ impl Theme {
             sidebar_folder_text: fg_secondary,
             success,
             warning,
+            error,
             bg_secondary,
             fg_secondary,
             fg_primary,
@@ -136,6 +140,7 @@ impl Theme {
                 "sidebar_folder_text" => theme.sidebar_folder_text = color,
                 "success" => theme.success = color,
                 "warning" => theme.warning = color,
+                "error" => theme.error = color,
                 "bg_secondary" => theme.bg_secondary = color,
                 "fg_secondary" => theme.fg_secondary = color,
                 "fg_primary" => theme.fg_primary = color,
