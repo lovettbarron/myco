@@ -3,6 +3,8 @@ pub mod renderer;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
+use crate::config::registry::ProjectEntry;
+
 /// Width of the sidebar in logical pixels (per UI-SPEC).
 pub const SIDEBAR_WIDTH: f32 = 240.0;
 
@@ -40,6 +42,8 @@ pub struct SidebarState {
     project_dir: PathBuf,
     /// Tracks which directories are expanded (by path).
     expanded_dirs: std::collections::HashSet<PathBuf>,
+    /// Registered projects for the project switcher section.
+    pub projects: Vec<ProjectEntry>,
 }
 
 impl SidebarState {
@@ -56,6 +60,7 @@ impl SidebarState {
             scroll_offset: 0.0,
             project_dir,
             expanded_dirs,
+            projects: Vec::new(),
         };
         state.refresh_file_tree();
         state
@@ -210,6 +215,11 @@ impl SidebarState {
         let entries = self.entries.len() as f32 * ENTRY_HEIGHT;
         let footer = 8.0 + ENTRY_HEIGHT; // gap + "New Canvas" button
         header + entries + footer
+    }
+
+    /// Set the list of registered projects for the sidebar project switcher.
+    pub fn set_projects(&mut self, projects: Vec<ProjectEntry>) {
+        self.projects = projects;
     }
 }
 

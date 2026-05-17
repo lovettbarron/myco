@@ -36,6 +36,8 @@ use crate::canvas::CanvasManager;
 use crate::markdown::{MarkdownManager, MarkdownRenderer};
 use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_WIDTH};
 use crate::sidebar::renderer::SidebarRenderer;
+use crate::config::registry::ProjectRegistry;
+use crate::picker::{PickerAction, PickerState};
 use crate::settings::{SettingsClickResult, SettingsRenderer, SettingsState};
 use crate::status_bar::{BottomBar, StatsBar, BOTTOM_BAR_HEIGHT, STATS_BAR_HEIGHT};
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
@@ -58,6 +60,15 @@ enum InitPrompt {
     None,
     /// Prompt is visible, waiting for user input.
     Showing,
+}
+
+/// Top-level application state: picker or workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppState {
+    /// Project picker is showing (no project loaded yet).
+    Picker,
+    /// Workspace is active (project loaded, grid rendered).
+    Workspace,
 }
 
 /// Height of the panel title bar area in logical points.
@@ -222,6 +233,12 @@ pub struct App {
     shortcut_registry: ShortcutRegistry,
     /// Chord state machine for multi-key shortcut sequences (D-15).
     chord_state: ChordStateMachine,
+    /// Top-level application state: picker or workspace.
+    app_state: AppState,
+    /// Picker state (only present when app_state == Picker).
+    picker_state: Option<PickerState>,
+    /// Project registry (persists across picker and workspace).
+    project_registry: ProjectRegistry,
 }
 
 impl App {
@@ -265,6 +282,9 @@ impl App {
             auto_save: crate::config::AutoSaveState::new(),
             shortcut_registry: ShortcutRegistry::new(),
             chord_state: ChordStateMachine::new(),
+            app_state: AppState::Picker,
+            picker_state: None,
+            project_registry: ProjectRegistry::new(),
         }
     }
 }
@@ -1248,6 +1268,55 @@ impl App {
                 info!("Project initialization skipped by user");
                 self.init_prompt = InitPrompt::None;
             }
+            InputAction::ProjectSwitch { path } => {
+                info!("Switching project to: {:?}", path);
+                // Save current layout before switching
+                if let (Some(grid), Some(project_dir)) = (&self.grid, &self.project_dir) {
+                    let config = crate::config::ProjectConfig::from_current_state(
+                        grid,
+                        &self.panels,
+                        self.terminal_manager.as_ref(),
+                        project_dir,
+                        Some(&self.theme_registry.active().name),
+                    );
+                    crate::config::save_project_config(project_dir, &config);
+                }
+                // Destroy all terminals
+                if let Some(tm) = &mut self.terminal_manager {
+                    let panel_ids: Vec<PanelId> = tm.terminals().keys().copied().collect();
+                    for pid in panel_ids {
+                        tm.destroy_terminal(&pid);
+                    }
+                }
+                // Destroy all canvases
+                if let Some(cm) = &mut self.canvas_manager {
+                    let panel_ids: Vec<PanelId> = self.panels.iter()
+                        .filter(|p| p.panel_type == PanelType::Canvas)
+                        .map(|p| p.id)
+                        .collect();
+                    for pid in panel_ids {
+                        cm.destroy_canvas(&pid);
+                    }
+                }
+                // Destroy all markdown viewers
+                if let Some(mm) = &mut self.markdown_manager {
+                    let panel_ids: Vec<PanelId> = self.panels.iter()
+                        .filter(|p| p.panel_type == PanelType::Markdown)
+                        .map(|p| p.id)
+                        .collect();
+                    for pid in panel_ids {
+                        mm.destroy_markdown(&pid);
+                    }
+                }
+                // Clear caches and panels
+                self.terminal_renderer.invalidate_all_caches();
+                for panel in &self.panels {
+                    self.markdown_renderer.invalidate_panel_cache(&panel.id);
+                }
+                self.panels.clear();
+                // Open new project
+                self.open_project(path);
+            }
         }
     }
 
@@ -1349,6 +1418,213 @@ impl App {
         } else {
             0.0
         }
+    }
+
+    /// Transition from Picker to Workspace: open a project and initialize workspace.
+    ///
+    /// Per D-09: selecting a project in the picker opens it.
+    /// Per D-11: projects auto-register on first open.
+    fn open_project(&mut self, project_path: std::path::PathBuf) {
+        info!("Opening project: {:?}", project_path);
+
+        // D-11: Auto-register project
+        self.project_registry.register(&project_path);
+
+        self.app_state = AppState::Workspace;
+        self.project_dir = Some(project_path.clone());
+        self.picker_state = None;
+
+        // Load saved project config (CFG-04)
+        let project_config = crate::config::load_project_config(&project_path);
+
+        // Apply saved theme or fall back to global preferences (D-01)
+        if let Some(ref config) = project_config {
+            if let Some(ref theme_name) = config.theme {
+                if self.theme_registry.set_active(theme_name) {
+                    self.theme = Theme::from_definition(self.theme_registry.active());
+                    info!("Restored project theme: {}", theme_name);
+                }
+            }
+        }
+        if project_config.as_ref().and_then(|c| c.theme.as_ref()).is_none() {
+            let global_prefs = crate::config::global::load_global_preferences();
+            if self.theme_registry.set_active(&global_prefs.default_theme) {
+                self.theme = Theme::from_definition(self.theme_registry.active());
+            }
+        }
+
+        // Initialize grid and panels from saved config or defaults
+        let cell_width = self.terminal_renderer.cell_width;
+        let cell_height = self.terminal_renderer.cell_height;
+
+        let (mut grid, panels_from_config) = if let Some(ref config) = project_config {
+            if crate::config::persistence::validate_config(config) {
+                let grid = GridLayout::from_config(&config.layout);
+                let mut panels = Vec::new();
+                let mut panel_id_counter: u64 = 0;
+
+                for col in &config.layout.columns {
+                    let caps = match col {
+                        crate::config::ColumnConfig::Single(cap) => vec![cap],
+                        crate::config::ColumnConfig::Stack { caps } => caps.iter().collect(),
+                    };
+                    for cap in caps {
+                        let pid = PanelId(panel_id_counter);
+                        panel_id_counter += 1;
+                        let panel = match cap.cap_type {
+                            crate::config::CapType::Terminal => Panel::new_terminal(pid),
+                            crate::config::CapType::Canvas => {
+                                let canvas_id = cap
+                                    .file
+                                    .as_ref()
+                                    .and_then(|f| {
+                                        std::path::Path::new(f)
+                                            .file_stem()
+                                            .map(|s| s.to_string_lossy().to_string())
+                                    })
+                                    .unwrap_or_else(|| format!("canvas-{}", panel_id_counter));
+                                Panel::new_canvas(pid, canvas_id)
+                            }
+                            crate::config::CapType::Markdown => {
+                                let file_path = cap
+                                    .file
+                                    .as_ref()
+                                    .map(|f| project_path.join(f));
+                                if let Some(path) = file_path {
+                                    Panel::new_markdown(pid, path)
+                                } else {
+                                    Panel::new_terminal(pid)
+                                }
+                            }
+                        };
+                        panels.push(panel);
+                    }
+                }
+
+                if panels.is_empty() {
+                    (GridLayout::new_single_panel(), vec![Panel::new_terminal(PanelId(0))])
+                } else {
+                    info!("Restored {} panels from saved config", panels.len());
+                    (grid, panels)
+                }
+            } else {
+                warn!("Saved config failed validation, using default layout");
+                (GridLayout::new_single_panel(), vec![Panel::new_terminal(PanelId(0))])
+            }
+        } else {
+            (GridLayout::new_single_panel(), vec![Panel::new_terminal(PanelId(0))])
+        };
+
+        // Compute grid layout
+        if let Some(window) = &self.window {
+            let size = window.inner_size();
+            if size.width > 0 && size.height > 0 {
+                let w = size.width as f32 / self.scale_factor;
+                let h = size.height as f32 / self.scale_factor;
+                let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+                grid.compute(w, grid_height.max(1.0));
+                self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
+            }
+        }
+
+        self.panels = panels_from_config;
+        self.focused_panel = self.panels.first().map(|p| p.id);
+
+        // Initialize bottom bar
+        self.bottom_bar = Some(BottomBar::new(project_path.clone()));
+
+        // Check if .myco folder exists
+        let myco_dir = project_path.join(".myco");
+        if !myco_dir.exists() {
+            self.init_prompt = InitPrompt::Showing;
+        }
+
+        let mut tm = TerminalManager::new(project_path.clone());
+
+        // Create canvas manager
+        self.canvas_manager = Some(CanvasManager::new(project_path.clone()));
+
+        // Create file sidebar state
+        let mut sidebar = SidebarState::new(project_path.clone());
+        sidebar.set_projects(self.project_registry.projects.clone());
+        self.sidebar = Some(sidebar);
+
+        // Start file watcher
+        if let Some(proxy) = &self.proxy {
+            match FileWatcher::new(&project_path, proxy.clone()) {
+                Ok(watcher) => {
+                    self.file_watcher = Some(watcher);
+                }
+                Err(e) => {
+                    warn!("Failed to start file watcher: {}", e);
+                }
+            }
+        }
+
+        // Create terminals, canvases, and markdown viewers for restored panels
+        for panel in &self.panels {
+            match panel.panel_type {
+                PanelType::Terminal => {
+                    if let Some(node_id) = grid.find_node(panel.id) {
+                        let (_, _, pw, ph) = grid.get_panel_rect(node_id);
+                        let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cell_width).max(2.0) as usize;
+                        let rows = ((ph - PANEL_TITLE_HEIGHT) / cell_height).max(1.0) as usize;
+
+                        // Use saved CWD from config if available
+                        let terminal_cwd = project_config.as_ref().and_then(|config| {
+                            let mut idx = 0u64;
+                            for col in &config.layout.columns {
+                                let caps = match col {
+                                    crate::config::ColumnConfig::Single(cap) => vec![cap],
+                                    crate::config::ColumnConfig::Stack { caps } => caps.iter().collect(),
+                                };
+                                for cap in caps {
+                                    if PanelId(idx) == panel.id {
+                                        return cap.cwd.as_ref().map(|cwd| project_path.join(cwd));
+                                    }
+                                    idx += 1;
+                                }
+                            }
+                            None
+                        });
+
+                        if let Some(cwd) = terminal_cwd {
+                            let terminal = crate::terminal::TerminalState::new(cols, rows, &cwd);
+                            match terminal {
+                                Ok(mut ts) => {
+                                    ts.cell_width = cell_width;
+                                    ts.cell_height = cell_height;
+                                    tm.terminals.insert(panel.id, ts);
+                                }
+                                Err(e) => warn!("Failed to create terminal with saved CWD: {}", e),
+                            }
+                        } else {
+                            if let Err(e) = tm.create_terminal(panel.id, cols, rows) {
+                                warn!("Failed to create terminal: {}", e);
+                            } else if let Some(ts) = tm.get_mut(&panel.id) {
+                                ts.cell_width = cell_width;
+                                ts.cell_height = cell_height;
+                            }
+                        }
+                    }
+                }
+                PanelType::Markdown => {
+                    if let Some(ref path) = panel.file_path {
+                        if let Some(mm) = &mut self.markdown_manager {
+                            if let Err(e) = mm.create_markdown(panel.id, path.clone()) {
+                                warn!("Failed to create markdown viewer: {}", e);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.terminal_manager = Some(tm);
+        self.grid = Some(grid);
+
+        info!("Workspace initialized for project: {:?}", project_path);
     }
 
     /// Create a canvas panel with the given canvas_id.
@@ -2277,10 +2553,56 @@ impl ApplicationHandler<UserEvent> for App {
             cell_width, cell_height, self.terminal_renderer.font_size
         );
 
-        // Create terminal manager with current directory as project dir (D-02)
-        let project_dir =
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        // D-10: Check for CLI argument (myco /path/to/project)
+        let cli_project_dir = std::env::args().nth(1).map(std::path::PathBuf::from);
+
+        // Determine project directory: CLI arg or CWD
+        let project_dir = if let Some(ref cli_path) = cli_project_dir {
+            if cli_path.exists() {
+                cli_path.clone()
+            } else {
+                warn!("CLI path does not exist: {:?}, falling back to CWD", cli_path);
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
+            }
+        } else {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
+        };
+
+        // If no CLI argument, show picker instead of workspace (D-09)
+        if cli_project_dir.is_none() {
+            info!("No CLI argument — showing project picker");
+
+            // Apply global theme preferences for picker view
+            let global_prefs = crate::config::global::load_global_preferences();
+            if self.theme_registry.set_active(&global_prefs.default_theme) {
+                self.theme = Theme::from_definition(self.theme_registry.active());
+            }
+
+            self.app_state = AppState::Picker;
+            self.picker_state = Some(PickerState::new(self.project_registry.projects.clone()));
+
+            self.window = Some(window);
+            self.renderer = Some(renderer);
+
+            // Set up native menu bar
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(proxy) = &self.proxy {
+                    self.menu_state = Some(crate::platform::menu::setup_menu_bar(proxy.clone()));
+                }
+            }
+
+            info!("Picker mode initialized with {} projects", self.project_registry.projects.len());
+            return;
+        }
+
+        // D-10: CLI argument present — open workspace directly, skip picker
+        info!("CLI argument present — opening workspace directly");
+        self.app_state = AppState::Workspace;
         self.project_dir = Some(project_dir.clone());
+
+        // D-11: Auto-register project
+        self.project_registry.register(&project_dir);
 
         // Load saved project config (CFG-04)
         let project_config = crate::config::load_project_config(&project_dir);
@@ -2388,8 +2710,10 @@ impl ApplicationHandler<UserEvent> for App {
         // Create canvas manager for TLDraw webview panels
         self.canvas_manager = Some(CanvasManager::new(project_dir.clone()));
 
-        // Create file sidebar state
-        self.sidebar = Some(SidebarState::new(project_dir.clone()));
+        // Create file sidebar state with project registry data
+        let mut sidebar = SidebarState::new(project_dir.clone());
+        sidebar.set_projects(self.project_registry.projects.clone());
+        self.sidebar = Some(sidebar);
 
         // Start file watcher for live markdown updates (CAP-04)
         if let Some(proxy) = &self.proxy {
@@ -2530,6 +2854,25 @@ impl ApplicationHandler<UserEvent> for App {
                 let lx = position.x / self.scale_factor as f64;
                 let ly = position.y / self.scale_factor as f64;
 
+                // Route cursor to picker when in picker mode
+                if self.app_state == AppState::Picker {
+                    self.mouse_state.cursor_x = lx;
+                    self.mouse_state.cursor_y = ly;
+                    if let Some(picker) = &mut self.picker_state {
+                        if let Some(window) = &self.window {
+                            let size = window.inner_size();
+                            let vw = size.width as f32 / self.scale_factor;
+                            let vh = size.height as f32 / self.scale_factor;
+                            let prev_hovered = picker.hovered;
+                            picker.hovered = picker.entry_at(lx as f32, ly as f32, vw, vh);
+                            if picker.hovered != prev_hovered {
+                                window.request_redraw();
+                            }
+                        }
+                    }
+                    return;
+                }
+
                 // Route cursor to settings overlay when visible
                 if self.settings.visible {
                     let viewport_y = TOP_CHROME_HEIGHT;
@@ -2584,6 +2927,42 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
+                // Route mouse clicks to picker when in picker mode (D-09)
+                if self.app_state == AppState::Picker
+                    && state == ElementState::Pressed
+                    && button == MouseButton::Left
+                {
+                    let lx = self.mouse_state.cursor_x as f32;
+                    let ly = self.mouse_state.cursor_y as f32;
+                    // Get viewport size before mutable operations
+                    let (vw, vh) = self.window.as_ref()
+                        .map(|w| {
+                            let s = w.inner_size();
+                            (s.width as f32 / self.scale_factor, s.height as f32 / self.scale_factor)
+                        })
+                        .unwrap_or((800.0, 600.0));
+                    let picker_action = self.picker_state.as_mut()
+                        .map(|picker| picker.handle_click(lx, ly, vw, vh));
+                    if let Some(action) = picker_action {
+                        match action {
+                            PickerAction::OpenProject(path) => {
+                                self.open_project(path);
+                            }
+                            PickerAction::OpenFolderDialog => {
+                                info!("Open folder dialog requested (deferred)");
+                            }
+                            PickerAction::LocateProject(_idx) => {
+                                info!("Locate project requested (deferred)");
+                            }
+                            PickerAction::None => {}
+                        }
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+
                 // Block mouse input while init prompt is showing
                 if self.init_prompt == InitPrompt::Showing {
                     return;
@@ -2764,6 +3143,55 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
+                // Intercept keys when in picker mode (D-09)
+                if self.app_state == AppState::Picker && event.state == ElementState::Pressed {
+                    use winit::keyboard::{Key, NamedKey};
+                    let picker_action = match &event.logical_key {
+                        Key::Named(NamedKey::ArrowDown) => {
+                            if let Some(picker) = &mut self.picker_state {
+                                picker.select_next();
+                            }
+                            None
+                        }
+                        Key::Named(NamedKey::ArrowUp) => {
+                            if let Some(picker) = &mut self.picker_state {
+                                picker.select_prev();
+                            }
+                            None
+                        }
+                        Key::Named(NamedKey::Enter) => {
+                            self.picker_state.as_ref().map(|p| p.handle_key_enter())
+                        }
+                        Key::Named(NamedKey::Escape) => {
+                            self.picker_state.as_ref().map(|p| p.handle_key_escape())
+                        }
+                        Key::Character(c) if self.modifiers.super_key() && c.as_str() == "q" => {
+                            event_loop.exit();
+                            None
+                        }
+                        _ => None,
+                    };
+                    if let Some(action) = picker_action {
+                        match action {
+                            PickerAction::OpenProject(path) => {
+                                self.open_project(path);
+                            }
+                            PickerAction::OpenFolderDialog => {
+                                // Deferred: folder dialog requires platform-specific code
+                                info!("Open folder dialog requested (deferred)");
+                            }
+                            PickerAction::LocateProject(_idx) => {
+                                info!("Locate project requested (deferred)");
+                            }
+                            PickerAction::None => {}
+                        }
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+
                 // Intercept keys when settings overlay is visible
                 if self.settings.visible && event.state == ElementState::Pressed {
                     use winit::keyboard::{Key, NamedKey};
@@ -2865,6 +3293,70 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::RedrawRequested => {
+                // Picker mode rendering: simplified path (no grid, no terminals)
+                if self.app_state == AppState::Picker {
+                    if let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) {
+                        let size = window.inner_size();
+                        let s = self.scale_factor;
+                        let logical_w = size.width as f32 / s;
+                        let logical_h = size.height as f32 / s;
+                        let physical_w = size.width as f32;
+                        let physical_h = size.height as f32;
+
+                        let mut quads = Vec::new();
+                        let mut labels = Vec::new();
+
+                        if let Some(picker) = &self.picker_state {
+                            quads = crate::picker::renderer::build_quads(
+                                picker, logical_w, logical_h, &self.theme,
+                            );
+                            labels = crate::picker::renderer::build_labels(
+                                picker, logical_w, logical_h, &self.theme,
+                            );
+                        }
+
+                        // Scale to physical
+                        let phys_quads: Vec<QuadInstance> = quads
+                            .into_iter()
+                            .map(|mut q| {
+                                q.position[0] *= s;
+                                q.position[1] *= s;
+                                q.size[0] *= s;
+                                q.size[1] *= s;
+                                q.corner_radius *= s;
+                                q
+                            })
+                            .collect();
+                        let phys_labels: Vec<TextLabel> = labels
+                            .into_iter()
+                            .map(|mut l| {
+                                l.x *= s;
+                                l.y *= s;
+                                l.width *= s;
+                                l.height *= s;
+                                l
+                            })
+                            .collect();
+
+                        match renderer.render(
+                            self.theme.background,
+                            &phys_quads,
+                            &phys_labels,
+                            physical_w,
+                            physical_h,
+                            s,
+                            vec![],
+                        ) {
+                            crate::renderer::RenderResult::Ok => {}
+                            crate::renderer::RenderResult::SkipFrame => {}
+                            crate::renderer::RenderResult::SurfaceLost => {
+                                warn!("Surface lost in picker mode");
+                            }
+                        }
+                    }
+                    // Skip workspace rendering
+                } else
+                // Workspace mode rendering (existing code)
                 if let Some(window) = &self.window {
                     let _frame_span = tracing::trace_span!("frame").entered();
                     let frame_start = Instant::now();
