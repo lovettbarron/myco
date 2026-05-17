@@ -589,20 +589,17 @@ fn load_custom_themes() -> Vec<ThemeDefinition> {
 
 ## Open Questions
 
-1. **Project registry persistence format**
+1. **Project registry persistence format** — RESOLVED
    - What we know: Projects need to be listed in the sidebar switcher. ~/.myco/ is the global config location. The switcher shows 3-5 entries.
-   - What's unclear: Should the project registry be a simple JSON array in ~/.myco/projects.json, or part of a larger global config file? Phase 5 (Configuration) owns CFG-03 (global config in ~/.myco/).
-   - Recommendation: Use a simple ~/.myco/projects.json for now. Phase 5 can consolidate if needed. Keep the format minimal (array of {path, name}).
+   - Resolution: Use ~/.myco/projects.json for v1 (simple array of {path, name}). Phase 5 can consolidate into global config if needed. Plan 02 initializes with current project only.
 
-2. **Settings form interactivity scope for v1**
+2. **Settings form interactivity scope for v1** — RESOLVED
    - What we know: D-09 specifies dropdown, font picker, keybinding editor, toggles. But keybinding editor is deferred.
-   - What's unclear: How interactive should the font picker be? Dropdown of all system fonts? Just a text field showing current font?
-   - Recommendation: Theme dropdown (fully interactive) + font family dropdown (list from FontSystem) + read-only keybinding display + simple toggles. This satisfies FRAME-05 without the deferred chord recording.
+   - Resolution: Theme dropdown (fully interactive) + font family as read-only label showing "JetBrains Mono" (interactive font picker deferred to Phase 5) + read-only keybinding display + simple toggles. This satisfies FRAME-05 without deferred components.
 
-3. **Project switch teardown completeness**
+3. **Project switch teardown completeness** — RESOLVED
    - What we know: D-04 specifies full window switch -- new file tree, grid layout, terminal contexts.
-   - What's unclear: How to handle unsaved state. Should terminals prompt before closing? Canvas auto-saves but is there a flush delay?
-   - Recommendation: For v1, close everything without prompting. Terminals don't have "unsaved" state (they're shells). Canvases auto-save on every change. Mark this as a polish item for later.
+   - Resolution: For v1, wire the action and UI only. Full teardown/rebuild requires config persistence (Phase 5 CFG-04). Plan 02 adds the ProjectSwitch action as a stub with info log.
 
 ## Environment Availability
 

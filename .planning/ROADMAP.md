@@ -20,6 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 6: AI Monitoring and Ship** - Process monitoring, intervention toasts, and v1 distribution readiness
 - [x] **Phase 7: Testing Infrastructure** - Headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, and criterion benchmarks (completed 2026-05-17)
 - [ ] **Phase 8: Agent Monitor Cap** - Dedicated GPU-rendered panel showing running AI agent sessions with status, token usage, running time, and intervention history
+- [ ] **Phase 9: Grid Layout Refactor** - Replace CSS Grid 2-level model with Warp-style recursive N-ary split tree using taffy Flexbox, with minimum panel sizes and smart split direction
 
 ## Phase Details
 
@@ -175,6 +176,24 @@ Plans:
 - [x] 07-02-PLAN.md -- Headless GPU snapshot tests with golden image comparison (TEST-01)
 - [x] 07-03-PLAN.md -- Property-based fuzzing (proptest) and criterion benchmarks (TEST-04, TEST-05)
 
+### Phase 9: Grid Layout Refactor
+**Goal**: User can split panels in any direction with Warp-style behavior — same-axis splits flatten as siblings, cross-axis splits nest, panels enforce minimum sizes, and divider drags respect size floors
+**Mode:** mvp
+**Depends on**: Phase 1 (can run in parallel with Phase 8)
+**Requirements**: GRID-01, GRID-02, GRID-03
+**Success Criteria** (what must be TRUE):
+  1. Splitting a panel creates a sibling in the same axis container (flattening) or nests a new perpendicular container (Warp-style N-ary tree behavior)
+  2. Panels cannot shrink below a minimum size (200px width, 150px height) — splits are rejected with a toast when the minimum can't be met
+  3. Divider drag resizing enforces minimum panel sizes on both sides of the divider
+  4. Closing a panel collapses unnecessary container nodes (single-child containers unwrap automatically)
+  5. The public grid API (`split_panel`, `close_panel`, `get_panel_rect`, `swap_panels`, `toggle_fullscreen`) is preserved so other phases are unaffected
+**Plans**: TBD
+
+Plans:
+- [ ] 09-01-PLAN.md -- Split tree data structure (replace CSS Grid model with recursive N-ary tree backed by taffy Flexbox nodes, PaneFlex weights, SplitDirection per branch)
+- [ ] 09-02-PLAN.md -- Split/close operations with flattening (same-axis sibling insertion, cross-axis nesting, container collapse on close, minimum size rejection)
+- [ ] 09-03-PLAN.md -- Divider drag constraints and smart split (minimum size enforcement during drag, optional auto-pick split direction by aspect ratio)
+
 ### Phase 8: Agent Monitor Cap
 **Goal**: User can open a dedicated panel that displays all running AI agent sessions with real-time status, resource usage, token spend, and intervention history — promoting the toast-based monitoring from Phase 6 into a full first-class cap
 **Mode:** mvp
@@ -195,8 +214,9 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8/9 (parallel)
 Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 if resources allow.
+Note: Phase 9 (Grid Layout Refactor) can run in parallel with Phase 8 — they touch different code areas. Merge Phase 9 first before final Phase 8 integration.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -208,3 +228,4 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | 6. AI Monitoring and Ship | 0/3 | Planning complete | - |
 | 7. Testing Infrastructure | 0/3 | Planning complete | - |
 | 8. Agent Monitor Cap | 0/3 | Not started | - |
+| 9. Grid Layout Refactor | 0/3 | Not started | - |

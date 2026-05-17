@@ -113,6 +113,7 @@ This phase wraps the existing workspace (grid + sidebar + custom title bar) in f
 - Token usage / LLM status in top bar slots — Phase 6 fills these in
 - Per-project theme overrides (theme defined in .myco file) — could add later if users want project-specific themes
 - Settings keybinding editor (Cmd+K style chord recording) — complex interactive component, may simplify in v1
+- Interactive font picker dropdown (list system fonts, live preview) — v1 shows current font as read-only label; full picker in Phase 5
 - Theme hot-reload (auto-update when theme JSON changes on disk) — nice-to-have, not required for v1
 
 </deferred>
