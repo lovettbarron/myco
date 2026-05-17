@@ -117,7 +117,7 @@ Plans:
   3. The .myco project config file is safe to commit to git (no secrets, no machine-specific paths)
   4. User can navigate between panels, create/close caps, and perform common actions via Warp-inspired keyboard shortcuts that are customizable in settings
   5. Standard macOS keyboard shortcuts (Cmd+C, Cmd+V, Cmd+Q, Cmd+W, Cmd+,) work correctly throughout the application
-**Plans**: 4 plans
+**Plans**: 5 plans
 **UI hint**: yes
 
 Plans:
@@ -128,6 +128,9 @@ Plans:
 **Wave 2** *(depends on Wave 1)*
 - [x] 05-03-PLAN.md -- Project picker and registry (GPU-rendered picker, ~/.myco/projects.json, sidebar project switcher, AppState enum)
 - [x] 05-04-PLAN.md -- Settings shortcut rebinding UI and project section (interactive recording mode, conflict toasts, theme override dropdown)
+
+**Wave 3** *(gap closure, depends on Wave 1)*
+- [ ] 05-05-PLAN.md -- Fix Cmd+Q quit in workspace mode (add InputAction::Quit, wire save-before-exit in keyboard dispatch)
 
 ### Phase 6: AI Monitoring and Ship
 **Goal**: User can monitor panel resource usage, receive intervention alerts, and install Myco as a polished macOS application
@@ -156,5 +159,5 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | 2. Terminal Cap | 2/2 | Complete   | 2026-05-16 |
 | 3. Webview Caps | 1/3 | Executing | - |
 | 4. Application Frame and Theming | 0/2 | Not started | - |
-| 5. Configuration and Persistence | 0/4 | Planning complete | - |
+| 5. Configuration and Persistence | 4/5 | Gap closure | - |
 | 6. AI Monitoring and Ship | 0/1 | Not started | - |
