@@ -122,8 +122,8 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 05-01-PLAN.md -- Config data model and layout save/restore (ProjectConfig serde structs, auto-save debounce, GridLayout::from_config)
-- [ ] 05-02-PLAN.md -- Configurable keyboard shortcuts (ShortcutRegistry, chord state machine, defaults table, replace hardcoded dispatch)
+- [x] 05-01-PLAN.md -- Config data model and layout save/restore (ProjectConfig serde structs, auto-save debounce, GridLayout::from_config)
+- [x] 05-02-PLAN.md -- Configurable keyboard shortcuts (ShortcutRegistry, chord state machine, defaults table, replace hardcoded dispatch)
 
 **Wave 2** *(depends on Wave 1)*
 - [ ] 05-03-PLAN.md -- Project picker and registry (GPU-rendered picker, ~/.myco/projects.json, sidebar project switcher, AppState enum)
