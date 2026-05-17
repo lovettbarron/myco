@@ -3,6 +3,72 @@
 //! Caps are the content types that live inside grid panels. Each cap type
 //! implements the `Cap` trait and optionally `GpuCap` or `WebviewCap`
 //! depending on its rendering strategy.
+//!
+//! # Modular Cap Plan
+//!
+//! The cap system is designed to scale from the current 3 types to 30+ over
+//! the next year. The migration is incremental — each stage is triggered by
+//! the pain of the previous architecture, not by a calendar.
+//!
+//! ## Stage 1: Trait definition + skill (now → ~5 caps)
+//!
+//! Current state. New caps are added using the `new-cap` skill checklist.
+//! Each cap has its own `*Manager` struct. The `App` struct holds one
+//! `Option<*Manager>` field per type. `app.rs` dispatches via
+//! `match panel_type` / `if panel.panel_type == PanelType::X`.
+//!
+//! **Validation gate:** implement `Cap` on `MarkdownState` as a proof that
+//! the trait covers a real GPU cap. Do this before adding cap #4. If the
+//! trait needs changes, it's cheap to fix with only one implementor.
+//!
+//! ## Stage 2: Trait migration (~5-10 caps)
+//!
+//! All managers implement `Cap` + `GpuCap`/`WebviewCap`. Replace per-type
+//! `Option<*Manager>` fields in `App` with a single registry:
+//!
+//! ```ignore
+//! caps: HashMap<PanelId, Box<dyn Cap>>,
+//! gpu_caps: HashMap<PanelId, Box<dyn GpuCap>>,    // downcast or separate
+//! webview_caps: HashMap<PanelId, Box<dyn WebviewCap>>,
+//! ```
+//!
+//! `PanelClose` becomes `self.caps.remove(&panel_id)` — one line instead
+//! of calling every manager's destroy method. The `PanelType` enum still
+//! exists for serialization and user-facing labels but is no longer used
+//! for dispatch.
+//!
+//! **Trigger:** when adding a new cap requires touching >5 `match` arms
+//! in `app.rs` and you're copy-pasting the same pattern for the third time.
+//!
+//! ## Stage 3: Input routing table + render dispatch (~10+ caps)
+//!
+//! Caps declare their input capabilities via the trait:
+//! - `captures_keyboard()` replaces per-type checks in `keyboard.rs`
+//! - `handle_scroll()` replaces the `match panel_type` in `mouse.rs`
+//! - `render_mode()` routes to GPU or webview path without type enumeration
+//!
+//! The render loop becomes:
+//! ```ignore
+//! for (panel_id, cap) in &self.caps {
+//!     match cap.render_mode() {
+//!         RenderMode::Gpu => { /* build_quads + collect_text_areas */ }
+//!         RenderMode::Webview => { /* reposition only */ }
+//!     }
+//! }
+//! ```
+//!
+//! **Trigger:** when the render loop's per-type `if` chain exceeds a
+//! screenful, or when a new cap doesn't fit neatly into Terminal/Canvas/
+//! Markdown patterns (e.g. a cap that mixes GPU overlay on a webview).
+//!
+//! ## What stays constant across all stages
+//!
+//! - Caps are isolated: no shared mutable state, no cross-cap references.
+//! - The `Panel` struct in `grid/panel.rs` remains the layout-level identity.
+//! - Cap-specific `InputAction` variants stay in `input/mod.rs` (caps don't
+//!   define their own action enums — that would fragment the input system).
+//! - File watching is centralized in `watcher/`, not per-cap.
+//! - The `new-cap` skill checklist is updated at each stage transition.
 
 use std::path::Path;
 
