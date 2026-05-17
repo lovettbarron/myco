@@ -106,4 +106,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-15 after initialization*
+*Last updated: 2026-05-17 — Phase 05 (Configuration and Persistence) complete. Layout save/restore, configurable shortcuts, project registry, settings overlay, and Cmd+Q quit fix all implemented.*
