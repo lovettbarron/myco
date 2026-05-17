@@ -236,6 +236,8 @@ pub struct App {
     menu_state: Option<crate::platform::menu::MenuState>,
     /// Path of the file/dir targeted by the sidebar context menu.
     context_menu_target: Option<std::path::PathBuf>,
+    /// Panel ID targeted by the panel header context menu (freeze/unfreeze).
+    context_menu_panel_id: Option<PanelId>,
     /// Accumulated sub-line pixel scroll delta for smooth trackpad scrolling.
     scroll_pixel_accumulator: f64,
     /// Top stats bar (panel count, uptime).
@@ -300,6 +302,7 @@ impl App {
             #[cfg(target_os = "macos")]
             menu_state: None,
             context_menu_target: None,
+            context_menu_panel_id: None,
             scroll_pixel_accumulator: 0.0,
             stats_bar: StatsBar::new(),
             bottom_bar: None,
@@ -331,6 +334,43 @@ impl App {
 
     /// Process an InputAction, applying it to the grid, panels, and terminals.
     fn process_action(&mut self, action: InputAction) {
+        // Frozen panel input blocking: drop terminal/body input for frozen panels.
+        // Allowed through frozen: ContextMenu (for unfreeze), FreezePanel, UnfreezePanel,
+        // PanelClose, FocusPanel, and all global/non-panel actions.
+        match &action {
+            InputAction::TerminalInput { panel_id, .. }
+            | InputAction::TerminalScroll { panel_id, .. }
+            | InputAction::TerminalCopy { panel_id }
+            | InputAction::TerminalPaste { panel_id }
+            | InputAction::TerminalFontSizeChange { panel_id, .. }
+            | InputAction::TerminalSearchOpen { panel_id }
+            | InputAction::TerminalSearchClose { panel_id }
+            | InputAction::TerminalSearchNext { panel_id }
+            | InputAction::TerminalSearchPrev { panel_id }
+            | InputAction::TerminalSearchUpdate { panel_id, .. }
+            | InputAction::TerminalSearchChar { panel_id, .. }
+            | InputAction::TerminalSearchBackspace { panel_id }
+            | InputAction::AutocompleteAccept { panel_id }
+            | InputAction::HistorySearchOpen { panel_id }
+            | InputAction::HistorySearchClose { panel_id }
+            | InputAction::HistorySearchChar { panel_id, .. }
+            | InputAction::HistorySearchBackspace { panel_id }
+            | InputAction::HistorySearchNext { panel_id }
+            | InputAction::HistorySearchPrev { panel_id }
+            | InputAction::HistorySearchAccept { panel_id }
+            | InputAction::TerminalSelectionStart { panel_id, .. }
+            | InputAction::TerminalSelectionUpdate { panel_id, .. }
+            | InputAction::TerminalSelectionEnd { panel_id }
+            | InputAction::MarkdownScroll { panel_id, .. }
+            | InputAction::CanvasZoom { panel_id, .. }
+            | InputAction::CanvasIpcMessage { panel_id, .. } => {
+                if self.panels.iter().any(|p| p.id == *panel_id && p.frozen) {
+                    return; // Block input to frozen panels
+                }
+            }
+            _ => {} // All other actions pass through
+        }
+
         match action {
             InputAction::DividerDragMove { delta_pixels } => {
                 if let (Some(grid), Some((div_idx, orientation))) = (
@@ -444,8 +484,25 @@ impl App {
                     self.recompute_layout();
                 }
             }
-            InputAction::ContextMenu { .. } => {
-                // Reserved for future use
+            InputAction::ContextMenu { panel_id, x, y } => {
+                // Panel header right-click: show freeze/unfreeze context menu
+                if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
+                    let is_frozen = panel.frozen;
+                    let has_process = panel.child_pid.is_some()
+                        || panel.panel_type == PanelType::Canvas
+                        || panel.panel_type == PanelType::Markdown;
+                    self.context_menu_panel_id = Some(panel_id);
+                    #[cfg(target_os = "macos")]
+                    if let Some(window) = &self.window {
+                        crate::platform::context_menu::show_panel_context_menu(
+                            window,
+                            x,
+                            y,
+                            is_frozen,
+                            has_process,
+                        );
+                    }
+                }
             }
             InputAction::SidebarOpenInPane { path } => {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -1384,11 +1441,101 @@ impl App {
                 // Open new project
                 self.open_project(path);
             }
-            InputAction::FreezePanel { .. } => {
-                // Implemented in Task 2 of Plan 06-02.
+            InputAction::FreezePanel { panel_id } => {
+                if let Some(panel) = self.panels.iter_mut().find(|p| p.id == panel_id) {
+                    if panel.frozen {
+                        return; // Already frozen
+                    }
+
+                    match panel.panel_type {
+                        PanelType::Terminal => {
+                            // Check exited state first (Pitfall 5: SIGSTOP on exited process)
+                            let is_exited = self
+                                .terminal_manager
+                                .as_ref()
+                                .and_then(|tm| tm.get(&panel_id))
+                                .map(|ts| ts.exited)
+                                .unwrap_or(true);
+
+                            if !is_exited {
+                                if let Some(child_pid) = panel.child_pid {
+                                    match crate::monitor::freeze_process_group(child_pid) {
+                                        Ok(()) => {
+                                            panel.frozen = true;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "Failed to freeze process {}: {}",
+                                                child_pid,
+                                                e
+                                            );
+                                            self.toast_manager.add(
+                                                crate::toast::ToastType::Error,
+                                                "Could not freeze process".to_string(),
+                                                Some(format!("SIGSTOP failed: {}", e)),
+                                                None,
+                                                None,
+                                                None,
+                                                std::time::Duration::from_secs(5),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        PanelType::Canvas | PanelType::Markdown => {
+                            // Webview freeze: set_visible(false) per research Pattern 4
+                            if let Some(cm) = &self.canvas_manager {
+                                if let Some(wv) = cm.get_webview(&panel_id) {
+                                    let _ = wv.set_visible(false);
+                                }
+                            }
+                            panel.frozen = true;
+                        }
+                        _ => {} // Placeholder panels: no-op
+                    }
+                }
             }
-            InputAction::UnfreezePanel { .. } => {
-                // Implemented in Task 2 of Plan 06-02.
+            InputAction::UnfreezePanel { panel_id } => {
+                if let Some(panel) = self.panels.iter_mut().find(|p| p.id == panel_id) {
+                    if !panel.frozen {
+                        return; // Not frozen
+                    }
+
+                    match panel.panel_type {
+                        PanelType::Terminal => {
+                            if let Some(child_pid) = panel.child_pid {
+                                match crate::monitor::unfreeze_process_group(child_pid) {
+                                    Ok(()) => {
+                                        panel.frozen = false;
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "Failed to unfreeze process {}: {}",
+                                            child_pid,
+                                            e
+                                        );
+                                        // Still unfreeze the panel state (process may have exited while frozen)
+                                        panel.frozen = false;
+                                    }
+                                }
+                            } else {
+                                panel.frozen = false;
+                            }
+                        }
+                        PanelType::Canvas | PanelType::Markdown => {
+                            if let Some(cm) = &self.canvas_manager {
+                                if let Some(wv) = cm.get_webview(&panel_id) {
+                                    let _ = wv.set_visible(true);
+                                }
+                            }
+                            panel.frozen = false;
+                        }
+                        _ => {
+                            panel.frozen = false;
+                        }
+                    }
+                }
             }
             InputAction::DismissToast { .. } => {
                 // Toast dismissal (future plan).
@@ -1423,6 +1570,23 @@ impl App {
                     }
                     _ => {
                         self.context_menu_target = Some(path);
+                        None
+                    }
+                };
+                if let Some(action) = action {
+                    self.process_action(action);
+                    return;
+                }
+            }
+
+            // Panel header context menu actions (freeze/unfreeze/close)
+            if let Some(panel_id) = self.context_menu_panel_id.take() {
+                let action = match tag {
+                    CTX_TAG_FREEZE => Some(InputAction::FreezePanel { panel_id }),
+                    CTX_TAG_UNFREEZE => Some(InputAction::UnfreezePanel { panel_id }),
+                    CTX_TAG_CLOSE_PANEL => Some(InputAction::PanelClose { panel_id }),
+                    _ => {
+                        self.context_menu_panel_id = Some(panel_id);
                         None
                     }
                 };
@@ -2282,6 +2446,24 @@ impl App {
             });
         }
 
+        // D-09: Frozen panel overlay (blue-tinted semi-transparent on frozen panels)
+        for &(node, panel_id) in grid.panel_nodes() {
+            let is_frozen = self
+                .panels
+                .iter()
+                .any(|p| p.id == panel_id && p.frozen);
+            if is_frozen {
+                let (px, py, pw, ph) = grid.get_panel_rect(node);
+                quads.push(QuadInstance {
+                    position: [px + sidebar_offset, py + TOP_CHROME_HEIGHT],
+                    size: [pw, ph],
+                    color: [0.1, 0.2, 0.4, 0.35], // Blue-tinted semi-transparent
+                    corner_radius: 0.0,
+                    _padding: 0.0,
+                });
+            }
+        }
+
         // Divider quads (offset by sidebar width)
         for (i, div) in self.dividers.dividers.iter().enumerate() {
             let is_hovered = self.mouse_state.hovered_divider == Some(i);
@@ -2457,10 +2639,14 @@ impl App {
 
             if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
                 // Panel title bar label (show title for markdown, type for others)
-                let title_text = match panel.panel_type {
+                let mut title_text = match panel.panel_type {
                     PanelType::Markdown | PanelType::Canvas => panel.title.clone(),
                     _ => panel.panel_type.to_string(),
                 };
+                // D-09: Append snowflake indicator for frozen panels
+                if panel.frozen {
+                    title_text.push_str(" \u{2744}\u{FE0E}");
+                }
                 labels.push(TextLabel {
                     text: title_text,
                     x: px + 8.0,
