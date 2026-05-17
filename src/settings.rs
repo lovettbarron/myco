@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::renderer::quad_renderer::QuadInstance;
 use crate::renderer::text_renderer::TextLabel;
-use crate::shortcuts::chord::{KeyCombo, Modifiers};
+use crate::shortcuts::chord::KeyCombo;
+#[cfg(test)]
+use crate::shortcuts::chord::Modifiers;
 use crate::shortcuts::registry::ShortcutRegistry;
 use crate::theme::{linear_to_srgb_u8, Theme};
 
@@ -185,6 +187,7 @@ impl RecordingState {
 pub enum SettingsShortcutResult {
     /// A new binding was set. Contains displaced (action_id, old_keys) if conflict.
     Bound {
+        #[allow(dead_code)]
         displaced: Option<(String, Vec<KeyCombo>)>,
     },
     /// Recording was cancelled (Escape pressed).
@@ -238,6 +241,8 @@ pub struct SettingsState {
     pub project_theme_dropdown: DropdownState,
     /// Project theme index (0 = "Global Default").
     pub project_theme_index: usize,
+    /// Whether .git directory is shown in sidebar.
+    pub show_git_directory: bool,
 }
 
 impl SettingsState {
@@ -259,6 +264,7 @@ impl SettingsState {
             project_description: String::new(),
             project_theme_dropdown: DropdownState::Closed,
             project_theme_index: 0,
+            show_git_directory: false,
         }
     }
 
@@ -510,20 +516,7 @@ fn modifier_symbol(combo: &KeyCombo) -> String {
     s
 }
 
-/// Compute the flat list of (group_label_or_none, action_id) for the shortcuts section.
-///
-/// Returns items as (Option<group_label>, action_id, flat_row_index).
-/// Group headers are not clickable rows but still take space.
-fn shortcut_items() -> Vec<(Option<&'static str>, &'static str)> {
-    let mut items = Vec::new();
-    for group in ShortcutGroup::all() {
-        items.push((Some(group.label()), ""));
-        for &action in group.actions() {
-            items.push((None, action));
-        }
-    }
-    items
-}
+
 
 /// Compute the y position and dimensions of shortcut content items.
 ///
@@ -914,7 +907,7 @@ impl SettingsRenderer {
     pub fn build_labels(
         state: &SettingsState,
         viewport_y: f32,
-        viewport_h: f32,
+        _viewport_h: f32,
         width: f32,
         theme: &Theme,
     ) -> Vec<TextLabel> {
@@ -1001,14 +994,38 @@ impl SettingsRenderer {
                     font_size: 20.0,
                     color: fg_primary_color,
                 });
+
+                // "Files" sub-heading
                 labels.push(TextLabel {
-                    text: "Font and editor settings will be configurable here.".to_string(),
+                    text: "Files".to_string(),
                     x: content_x,
                     y: content_y + 48.0,
-                    width: 400.0,
+                    width: 200.0,
                     height: 20.0,
                     font_size: 13.0,
                     color: fg_secondary_color,
+                });
+
+                // Show .git directory toggle
+                let toggle_y = content_y + 48.0 + 28.0;
+                let checkbox_text = if state.show_git_directory { "\u{2611}" } else { "\u{2610}" };
+                labels.push(TextLabel {
+                    text: checkbox_text.to_string(),
+                    x: content_x,
+                    y: toggle_y,
+                    width: 20.0,
+                    height: 20.0,
+                    font_size: 15.0,
+                    color: fg_primary_color,
+                });
+                labels.push(TextLabel {
+                    text: "Show .git directory in sidebar".to_string(),
+                    x: content_x + 24.0,
+                    y: toggle_y + 1.0,
+                    width: 300.0,
+                    height: 20.0,
+                    font_size: 13.0,
+                    color: fg_primary_color,
                 });
             }
             SettingsSection::Shortcuts => {
@@ -1747,6 +1764,17 @@ impl SettingsState {
             }
         }
 
+        // Check .git toggle click (Editor section)
+        if self.active_section == SettingsSection::Editor {
+            let content_x = NAV_COLUMN_WIDTH + CONTENT_PADDING;
+            let content_y = viewport_y + CONTENT_PADDING;
+            let toggle_y = content_y + 48.0 + 28.0;
+            if x >= content_x && x <= content_x + 320.0 && y >= toggle_y && y <= toggle_y + 20.0 {
+                self.show_git_directory = !self.show_git_directory;
+                return SettingsClickResult::ShowGitDirectoryToggled(self.show_git_directory);
+            }
+        }
+
         SettingsClickResult::Consumed
     }
 }
@@ -1764,6 +1792,8 @@ pub enum SettingsClickResult {
     ShortcutRecordingStarted,
     /// Project theme override changed (None = "Global Default").
     ProjectThemeChanged(Option<String>),
+    /// Show .git directory toggle changed.
+    ShowGitDirectoryToggled(bool),
 }
 
 #[cfg(test)]

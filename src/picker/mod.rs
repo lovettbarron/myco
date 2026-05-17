@@ -126,8 +126,10 @@ impl PickerState {
         let content_w = CONTENT_MAX_WIDTH.min(viewport_w - 48.0);
         let content_x = (viewport_w - content_w) / 2.0;
         let title_area = TOP_OFFSET + 32.0 + 16.0;
+        let empty_state_height = if self.entries.is_empty() { 80.0 } else { 0.0 };
         let open_folder_y = title_area
             + (self.entries.len() as f32 * (CARD_HEIGHT + CARD_SPACING))
+            + empty_state_height
             + 8.0;
 
         if x >= content_x

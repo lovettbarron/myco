@@ -5,7 +5,9 @@ const PARAGRAPH_GAP: f32 = 16.0;
 const H1_TOP_MARGIN: f32 = 32.0;
 const H2_TOP_MARGIN: f32 = 24.0;
 const H3_TOP_MARGIN: f32 = 16.0;
-pub const CONTENT_PADDING: f32 = 16.0; // left/right padding
+pub const CONTENT_PADDING: f32 = 16.0;  // left/right padding
+pub const TABLE_ROW_H: f32 = 22.0;      // exposed for renderer
+pub const TABLE_PAD: f32 = 8.0;         // exposed for renderer
 
 /// Line heights per UI-SPEC
 const BODY_LINE_HEIGHT: f32 = 21.0;    // 14px * 1.5
@@ -48,6 +50,11 @@ fn block_top_margin(block_type: &BlockType) -> f32 {
     }
 }
 
+/// Table row height (line height + cell padding).
+const TABLE_ROW_HEIGHT: f32 = 22.0;
+/// Table vertical padding (top and bottom).
+const TABLE_PADDING: f32 = 8.0;
+
 /// Estimate the content height of a block (excluding top margin).
 fn block_content_height(block: &MarkdownBlock) -> f32 {
     match &block.block_type {
@@ -65,6 +72,10 @@ fn block_content_height(block: &MarkdownBlock) -> f32 {
                 .count()
                 .max(1) as f32;
             CODE_BLOCK_PADDING * 2.0 + line_count * CODE_LINE_HEIGHT
+        }
+        BlockType::Table { header, rows, .. } => {
+            let row_count = if header.is_empty() { 0 } else { 1 } + rows.len();
+            TABLE_PADDING * 2.0 + (row_count as f32) * TABLE_ROW_HEIGHT
         }
         BlockType::Paragraph
         | BlockType::BlockQuote
@@ -122,6 +133,7 @@ pub fn font_size_for_block(block_type: &BlockType) -> f32 {
     match block_type {
         BlockType::Heading(1) => DISPLAY_FONT_SIZE,
         BlockType::Heading(_) => HEADING_FONT_SIZE,
+        BlockType::Table { .. } => BODY_FONT_SIZE,
         _ => BODY_FONT_SIZE,
     }
 }
@@ -133,6 +145,7 @@ pub fn line_height_for_block(block_type: &BlockType) -> f32 {
         BlockType::Heading(2) | BlockType::Heading(3) => HEADING_LINE_HEIGHT,
         BlockType::Heading(_) => HEADING_LINE_HEIGHT,
         BlockType::CodeBlock(_) => CODE_LINE_HEIGHT,
+        BlockType::Table { .. } => TABLE_ROW_HEIGHT,
         _ => BODY_LINE_HEIGHT,
     }
 }

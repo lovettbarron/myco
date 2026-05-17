@@ -24,6 +24,9 @@ pub struct GlobalPreferences {
     /// Optional font size override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f32>,
+    /// Whether to show .git directory in the sidebar (default: false).
+    #[serde(default)]
+    pub show_git_directory: bool,
 }
 
 impl Default for GlobalPreferences {
@@ -33,6 +36,7 @@ impl Default for GlobalPreferences {
             default_theme: "Dracula".to_string(),
             font_family: None,
             font_size: None,
+            show_git_directory: false,
         }
     }
 }
@@ -154,6 +158,7 @@ mod tests {
             default_theme: "Dracula".to_string(),
             font_family: Some("JetBrains Mono".to_string()),
             font_size: Some(14.0),
+            show_git_directory: false,
         };
 
         let json = serde_json::to_string_pretty(&prefs).unwrap();

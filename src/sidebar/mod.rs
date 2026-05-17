@@ -5,8 +5,14 @@ use tracing::debug;
 
 use crate::config::registry::ProjectEntry;
 
-/// Width of the sidebar in logical pixels (per UI-SPEC).
-pub const SIDEBAR_WIDTH: f32 = 240.0;
+/// Default width of the sidebar in logical pixels.
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.0;
+
+/// Minimum sidebar width in logical pixels.
+pub const SIDEBAR_MIN_WIDTH: f32 = 160.0;
+
+/// Hit zone width for the sidebar resize edge (pixels from the right edge).
+pub const SIDEBAR_EDGE_HIT_ZONE: f32 = 4.0;
 
 /// Height of each file entry row (matches PANEL_TITLE_HEIGHT for visual consistency).
 const ENTRY_HEIGHT: f32 = 28.0;
@@ -30,6 +36,8 @@ pub struct FileEntry {
 pub struct SidebarState {
     /// Whether the sidebar is currently visible.
     pub visible: bool,
+    /// Current sidebar width in logical pixels.
+    pub width: f32,
     /// Flat list of visible file entries (expanded dirs show children).
     pub entries: Vec<FileEntry>,
     /// Currently selected entry index (None if nothing selected).
@@ -44,16 +52,19 @@ pub struct SidebarState {
     expanded_dirs: std::collections::HashSet<PathBuf>,
     /// Registered projects for the project switcher section.
     pub projects: Vec<ProjectEntry>,
+    /// Whether to show the .git directory in the file tree.
+    pub show_git_directory: bool,
 }
 
 impl SidebarState {
-    pub fn new(project_dir: PathBuf) -> Self {
+    pub fn new(project_dir: PathBuf, show_git_directory: bool) -> Self {
         let mut expanded_dirs = std::collections::HashSet::new();
         // Auto-expand .myco directory
         expanded_dirs.insert(project_dir.join(".myco"));
 
         let mut state = Self {
             visible: true, // Visible by default, toggle with Cmd+B
+            width: SIDEBAR_DEFAULT_WIDTH,
             entries: Vec::new(),
             selected: None,
             hovered: None,
@@ -61,6 +72,7 @@ impl SidebarState {
             project_dir,
             expanded_dirs,
             projects: Vec::new(),
+            show_git_directory,
         };
         state.refresh_file_tree();
         state
@@ -70,6 +82,13 @@ impl SidebarState {
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
         debug!("Sidebar visibility: {}", self.visible);
+    }
+
+    /// Resize the sidebar by a pixel delta, clamping to min and max.
+    /// `window_width` is the total window width for computing the 40% max.
+    pub fn resize(&mut self, delta: f32, window_width: f32) {
+        let max_width = window_width * 0.4;
+        self.width = (self.width + delta).clamp(SIDEBAR_MIN_WIDTH, max_width);
     }
 
     /// Get the project directory.
@@ -107,8 +126,8 @@ impl SidebarState {
             let path = entry.path();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
 
-            // Skip hidden files except .myco directory (which contains canvas files)
-            if name.starts_with('.') && name != ".myco" {
+            // Hide .git unless show_git_directory is enabled
+            if name == ".git" && !self.show_git_directory {
                 continue;
             }
 
@@ -209,7 +228,7 @@ impl SidebarState {
         }
     }
 
-    /// Get the total visible height of sidebar content.
+    #[allow(dead_code)]
     pub fn content_height(&self) -> f32 {
         let header = 16.0 + 15.6 + 8.0; // top padding + FILES heading + gap
         let entries = self.entries.len() as f32 * ENTRY_HEIGHT;

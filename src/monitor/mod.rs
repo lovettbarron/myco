@@ -34,7 +34,7 @@ pub struct ResourceState {
     pub cpu_percent: f32,
     /// Memory usage in bytes.
     pub memory_bytes: u64,
-    /// When this state was last updated.
+    #[allow(dead_code)]
     pub last_updated: Instant,
 }
 
@@ -69,7 +69,7 @@ pub struct InterventionAlert {
     pub panel_id: PanelId,
     /// Pattern ID that matched (or "__idle_heuristic" for idle detection).
     pub pattern_id: String,
-    /// Tool name for attribution (e.g., "Claude Code", "System", "Process").
+    #[allow(dead_code)]
     pub tool_name: String,
     /// Human-readable message to display in the toast.
     pub message: String,

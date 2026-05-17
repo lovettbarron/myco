@@ -76,7 +76,7 @@ use crate::grid::PanelId;
 use crate::renderer::quad_renderer::QuadInstance;
 use crate::theme::Theme;
 
-/// How a cap renders its content within a panel.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderMode {
     /// GPU-rendered via the shared wgpu pipeline. Produces quads and text areas
@@ -87,7 +87,7 @@ pub enum RenderMode {
     Webview,
 }
 
-/// Events a cap emits back to the app.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum CapEvent {
     /// Content changed — schedule a redraw.
@@ -98,7 +98,7 @@ pub enum CapEvent {
     Action(crate::input::InputAction),
 }
 
-/// Content bounds for a panel's drawable area (after title bar, padding).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct CapBounds {
     pub x: f32,

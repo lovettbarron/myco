@@ -64,6 +64,12 @@ impl TextEngine {
         &mut self.font_system
     }
 
+    /// Trim the glyph atlas, discarding entries not used in the last frame.
+    /// Call after theme changes to flush stale colored glyphs.
+    pub fn trim_atlas(&mut self) {
+        self.atlas.trim();
+    }
+
     /// Load a font from raw bytes into the font system.
     pub fn load_font_data(&mut self, data: Vec<u8>) {
         self.font_system.db_mut().load_font_data(data);

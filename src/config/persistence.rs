@@ -187,7 +187,7 @@ impl AutoSaveState {
         self.dirty_since = None;
     }
 
-    /// Check if the state is currently dirty.
+    #[allow(dead_code)]
     pub fn is_dirty(&self) -> bool {
         self.dirty_since.is_some()
     }

@@ -163,17 +163,17 @@ impl Renderer {
         RenderResult::Ok
     }
 
-    /// Access the underlying GPU state's device.
+    #[allow(dead_code)]
     pub fn device(&self) -> &wgpu::Device {
         self.gpu_state.device()
     }
 
-    /// Access the underlying GPU state's queue.
+    #[allow(dead_code)]
     pub fn queue(&self) -> &wgpu::Queue {
         self.gpu_state.queue()
     }
 
-    /// The texture format of the surface.
+    #[allow(dead_code)]
     pub fn format(&self) -> wgpu::TextureFormat {
         self.gpu_state.format()
     }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 /// Per-panel canvas state.
 #[derive(Debug, Clone)]
 pub struct CanvasState {
-    /// Unique canvas identifier (used as filename without .tldr extension).
+    #[allow(dead_code)]
     pub canvas_id: String,
     /// Path to the .tldr file in .myco/canvas/.
     pub tldr_path: PathBuf,

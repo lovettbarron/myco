@@ -92,7 +92,7 @@ pub struct TerminalState {
     /// Whether the terminal grid has visual damage since last render.
     content_dirty: bool,
 
-    /// Event listener handle for clearing the wake coalescing flag.
+    #[allow(dead_code)]
     event_listener: MycoEventListener,
 
     /// Initial working directory (project dir).

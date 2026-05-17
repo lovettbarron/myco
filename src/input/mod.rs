@@ -98,6 +98,8 @@ pub enum InputAction {
     MarkdownFileChanged { path: PathBuf },
     /// Toggle sidebar visibility.
     ToggleSidebar,
+    /// Sidebar edge drag resize (delta in pixels).
+    SidebarResizeDrag { delta_pixels: f32 },
     /// Open file from sidebar.
     SidebarSelect { path: PathBuf },
     /// Create new canvas from sidebar.

@@ -11,7 +11,7 @@ pub mod definition;
 pub mod loader;
 
 pub use colors::{hex_to_linear, hex_to_srgb_u8, linear_to_srgb_u8, srgb_to_linear};
-pub use definition::{ThemeAnsi, ThemeBase, ThemeDefinition};
+pub use definition::ThemeDefinition;
 pub use loader::load_custom_themes;
 
 use crate::terminal::colors::AnsiPalette;
@@ -153,7 +153,7 @@ impl Theme {
         theme
     }
 
-    /// Dracula theme (default). Alias for backwards compatibility.
+    #[allow(dead_code)]
     pub fn dark() -> Self {
         Self::from_definition(&builtin::dracula())
     }
@@ -219,7 +219,7 @@ impl ThemeRegistry {
         self.themes.iter().map(|t| t.name.as_str()).collect()
     }
 
-    /// Look up a theme definition by name.
+    #[allow(dead_code)]
     pub fn get(&self, name: &str) -> Option<&ThemeDefinition> {
         self.themes.iter().find(|t| t.name == name)
     }

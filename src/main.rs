@@ -1,5 +1,6 @@
 mod app;
 mod canvas;
+#[allow(dead_code)]
 mod cap;
 mod config;
 mod context;

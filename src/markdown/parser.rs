@@ -1,5 +1,5 @@
 use glyphon::cosmic_text::{Attrs, Color, Family, Style as FontStyle, Weight};
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 /// A rendered markdown block with pre-computed styling.
 #[derive(Debug, Clone)]
@@ -8,6 +8,26 @@ pub struct MarkdownBlock {
     pub spans: Vec<(String, Attrs<'static>)>,
     /// Block type determines vertical spacing and decoration quads.
     pub block_type: BlockType,
+}
+
+/// Column alignment for table cells.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TableAlign {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+impl From<Alignment> for TableAlign {
+    fn from(a: Alignment) -> Self {
+        match a {
+            Alignment::None => TableAlign::None,
+            Alignment::Left => TableAlign::Left,
+            Alignment::Center => TableAlign::Center,
+            Alignment::Right => TableAlign::Right,
+        }
+    }
 }
 
 /// Type of markdown block -- determines rendering behavior.
@@ -20,6 +40,11 @@ pub enum BlockType {
     BlockQuote,
     HorizontalRule,
     TaskListItem { checked: bool, depth: u8 },
+    Table {
+        alignments: Vec<TableAlign>,
+        header: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
 }
 
 /// Parse markdown text into a list of styled blocks ready for GPU rendering.
@@ -40,6 +65,15 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<MarkdownBlock> {
     let mut style_stack: Vec<Attrs<'static>> = vec![body_attrs()];
     let mut list_depth: u8 = 0;
     let mut ordered_stack: Vec<bool> = Vec::new();
+
+    // Table parsing state
+    let mut in_table = false;
+    let mut table_alignments: Vec<TableAlign> = Vec::new();
+    let mut table_header: Vec<String> = Vec::new();
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut current_row: Vec<String> = Vec::new();
+    let mut current_cell = String::new();
+    let mut in_table_head = false;
 
     for event in parser {
         match event {
@@ -103,8 +137,7 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<MarkdownBlock> {
                 flush_block(&mut blocks, &mut current_spans, &current_block_type);
                 current_block_type = BlockType::Paragraph;
             }
-            Event::Code(text) => {
-                // Inline code
+            Event::Code(text) if !in_table => {
                 current_spans.push((text.to_string(), inline_code_attrs()));
             }
             Event::Start(Tag::BlockQuote(_)) => {
@@ -149,17 +182,95 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<MarkdownBlock> {
                 let attrs = style_stack.last().cloned().unwrap_or_else(body_attrs);
                 current_spans.push((marker.to_string(), attrs));
             }
+            Event::Start(Tag::Table(alignments)) => {
+                flush_block(&mut blocks, &mut current_spans, &current_block_type);
+                in_table = true;
+                table_alignments = alignments.into_iter().map(TableAlign::from).collect();
+                table_header.clear();
+                table_rows.clear();
+            }
+            Event::End(TagEnd::Table) => {
+                if !current_row.is_empty() {
+                    if in_table_head {
+                        table_header = std::mem::take(&mut current_row);
+                    } else {
+                        table_rows.push(std::mem::take(&mut current_row));
+                    }
+                }
+                blocks.push(MarkdownBlock {
+                    spans: Vec::new(),
+                    block_type: BlockType::Table {
+                        alignments: std::mem::take(&mut table_alignments),
+                        header: std::mem::take(&mut table_header),
+                        rows: std::mem::take(&mut table_rows),
+                    },
+                });
+                in_table = false;
+                in_table_head = false;
+                current_block_type = BlockType::Paragraph;
+            }
+            Event::Start(Tag::TableHead) => {
+                in_table_head = true;
+                current_row.clear();
+            }
+            Event::End(TagEnd::TableHead) => {
+                table_header = std::mem::take(&mut current_row);
+                in_table_head = false;
+            }
+            Event::Start(Tag::TableRow) => {
+                current_row.clear();
+            }
+            Event::End(TagEnd::TableRow) => {
+                if !in_table_head {
+                    table_rows.push(std::mem::take(&mut current_row));
+                }
+            }
+            Event::Start(Tag::TableCell) => {
+                current_cell.clear();
+            }
+            Event::End(TagEnd::TableCell) => {
+                current_row.push(std::mem::take(&mut current_cell));
+            }
             Event::Text(text) => {
-                let attrs = style_stack.last().cloned().unwrap_or_else(body_attrs);
-                current_spans.push((text.to_string(), attrs));
+                if in_table {
+                    current_cell.push_str(&text);
+                } else {
+                    let attrs = style_stack.last().cloned().unwrap_or_else(body_attrs);
+                    current_spans.push((text.to_string(), attrs));
+                }
             }
             Event::SoftBreak => {
-                let attrs = style_stack.last().cloned().unwrap_or_else(body_attrs);
-                current_spans.push((" ".to_string(), attrs));
+                if in_table {
+                    current_cell.push(' ');
+                } else {
+                    let attrs = style_stack.last().cloned().unwrap_or_else(body_attrs);
+                    current_spans.push((" ".to_string(), attrs));
+                }
             }
             Event::HardBreak => {
-                let attrs = style_stack.last().cloned().unwrap_or_else(body_attrs);
-                current_spans.push(("\n".to_string(), attrs));
+                if in_table {
+                    current_cell.push(' ');
+                } else {
+                    let attrs = style_stack.last().cloned().unwrap_or_else(body_attrs);
+                    current_spans.push(("\n".to_string(), attrs));
+                }
+            }
+            Event::Code(text) if in_table => {
+                current_cell.push_str(&text);
+            }
+            Event::Html(text) => {
+                flush_block(&mut blocks, &mut current_spans, &current_block_type);
+                let attrs = html_comment_attrs();
+                current_spans.push((text.to_string(), attrs));
+                flush_block(&mut blocks, &mut current_spans, &BlockType::Paragraph);
+                current_block_type = BlockType::Paragraph;
+            }
+            Event::InlineHtml(text) => {
+                if in_table {
+                    current_cell.push_str(&text);
+                } else {
+                    current_spans.push((text.to_string(), html_comment_attrs()));
+                }
             }
             Event::Rule => {
                 flush_block(&mut blocks, &mut current_spans, &current_block_type);
@@ -169,7 +280,7 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<MarkdownBlock> {
                 });
                 current_block_type = BlockType::Paragraph;
             }
-            _ => {} // Tables, footnotes handled as passthrough text
+            _ => {}
         }
     }
     // Flush any remaining content
@@ -235,6 +346,13 @@ fn link_attrs() -> Attrs<'static> {
         .family(Family::SansSerif)
         .weight(Weight::NORMAL)
         .color(Color::rgb(139, 233, 253)) // #8be9fd cyan
+}
+
+fn html_comment_attrs() -> Attrs<'static> {
+    Attrs::new()
+        .family(Family::Monospace)
+        .weight(Weight::NORMAL)
+        .color(Color::rgb(98, 114, 164)) // #6272a4 comment color
 }
 
 #[cfg(test)]
@@ -307,5 +425,54 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         // Should have at least: "Use ", "cargo build", " to compile"
         assert!(blocks[0].spans.len() >= 3);
+    }
+
+    #[test]
+    fn test_parse_table() {
+        let md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
+        let blocks = parse_markdown_to_blocks(md);
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].block_type {
+            BlockType::Table { alignments, header, rows } => {
+                assert_eq!(alignments.len(), 2);
+                assert_eq!(header.len(), 2);
+                assert_eq!(header[0], "Name");
+                assert_eq!(header[1], "Age");
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0][0], "Alice");
+                assert_eq!(rows[0][1], "30");
+                assert_eq!(rows[1][0], "Bob");
+                assert_eq!(rows[1][1], "25");
+            }
+            _ => panic!("Expected Table block type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_with_alignment() {
+        let md = "| Left | Center | Right |\n| :--- | :---: | ---: |\n| a | b | c |";
+        let blocks = parse_markdown_to_blocks(md);
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].block_type {
+            BlockType::Table { alignments, .. } => {
+                assert_eq!(alignments[0], TableAlign::Left);
+                assert_eq!(alignments[1], TableAlign::Center);
+                assert_eq!(alignments[2], TableAlign::Right);
+            }
+            _ => panic!("Expected Table block type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_with_inline_code() {
+        let md = "| Command | Description |\n| --- | --- |\n| `ls` | List files |";
+        let blocks = parse_markdown_to_blocks(md);
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].block_type {
+            BlockType::Table { rows, .. } => {
+                assert_eq!(rows[0][0], "ls");
+            }
+            _ => panic!("Expected Table block type"),
+        }
     }
 }

@@ -73,15 +73,21 @@ impl StatsBar {
     /// Update uptime slot from elapsed time since start.
     pub fn update_uptime(&mut self) {
         let elapsed = self.start_time.elapsed();
-        let total_secs = elapsed.as_secs();
-        let hours = total_secs / 3600;
-        let minutes = (total_secs % 3600) / 60;
+        let total_mins = elapsed.as_secs() / 60;
         if let Some(slot) = self.slots.get_mut(1) {
-            if hours > 0 {
-                slot.value = format!("{:02}:{:02}", hours, minutes);
+            slot.value = if total_mins < 1 {
+                "<1m".to_string()
+            } else if total_mins < 60 {
+                format!("{}m", total_mins)
             } else {
-                slot.value = format!("{}:{:02}", minutes, total_secs % 60);
-            }
+                let hours = total_mins / 60;
+                let mins = total_mins % 60;
+                if mins == 0 {
+                    format!("{}h", hours)
+                } else {
+                    format!("{}h {}m", hours, mins)
+                }
+            };
         }
     }
 

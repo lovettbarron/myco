@@ -1,5 +1,6 @@
 pub mod app;
 pub mod canvas;
+#[allow(dead_code)]
 pub mod cap;
 pub mod config;
 pub mod context;

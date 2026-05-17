@@ -56,6 +56,7 @@ pub struct MenuConfig {
 #[derive(Debug, Deserialize)]
 pub struct MenuDef {
     pub title: String,
+    #[allow(dead_code)]
     #[serde(default)]
     pub system: bool,
     pub items: Vec<MenuItemDef>,

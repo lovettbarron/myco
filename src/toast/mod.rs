@@ -36,7 +36,7 @@ pub enum ToastType {
     Conflict,
     /// AI intervention needed (e.g., Claude Code awaiting input).
     Intervention,
-    /// General informational toast.
+    #[allow(dead_code)]
     Info,
     /// Error toast.
     Error,

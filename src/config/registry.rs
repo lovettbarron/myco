@@ -210,14 +210,14 @@ impl ProjectRegistry {
         self.save();
     }
 
-    /// Remove a project by path.
+    #[allow(dead_code)]
     pub fn remove(&mut self, project_path: &Path) {
         let canonical = project_path.canonicalize().unwrap_or_else(|_| project_path.to_path_buf());
         self.projects.retain(|e| e.path != canonical);
         self.save();
     }
 
-    /// Update the `last_opened` timestamp for a project.
+    #[allow(dead_code)]
     pub fn update_last_opened(&mut self, project_path: &Path) {
         let canonical = project_path.canonicalize().unwrap_or_else(|_| project_path.to_path_buf());
         if let Some(entry) = self.projects.iter_mut().find(|e| e.path == canonical) {

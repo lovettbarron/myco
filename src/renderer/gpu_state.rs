@@ -12,6 +12,7 @@ pub struct GpuState {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     format: wgpu::TextureFormat,
+    #[allow(dead_code)]
     window: Arc<Window>,
 }
 

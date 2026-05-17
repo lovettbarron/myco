@@ -125,7 +125,7 @@ impl CanvasManager {
         }
     }
 
-    /// Get an immutable reference to a canvas state.
+    #[allow(dead_code)]
     pub fn get(&self, panel_id: &PanelId) -> Option<&CanvasState> {
         self.canvases.get(panel_id)
     }
@@ -229,8 +229,7 @@ impl CanvasManager {
     }
 
     /// Insert a canvas state without creating a webview.
-    /// Used by integration tests to test handle_ipc_message without wry.
-    #[doc(hidden)]
+    #[allow(dead_code)]
     pub fn insert_canvas_state(&mut self, panel_id: PanelId, state: CanvasState) {
         self.canvases.insert(panel_id, state);
     }

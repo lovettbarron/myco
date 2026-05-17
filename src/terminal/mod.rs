@@ -23,7 +23,7 @@ use tracing::debug;
 use crate::grid::PanelId;
 use history::CommandHistory;
 
-/// Unique identifier for a terminal instance.
+#[allow(dead_code)]
 pub type TerminalId = u64;
 
 /// Manages all terminal instances in the workspace.
@@ -100,7 +100,7 @@ impl TerminalManager {
         &mut self.terminals
     }
 
-    /// Access a terminal and history simultaneously (split borrow).
+    #[allow(dead_code)]
     pub fn with_terminal_and_history(
         &mut self,
         panel_id: &PanelId,
@@ -116,10 +116,16 @@ impl TerminalManager {
     /// Update cursor blink state for all terminals.
     ///
     /// Returns true if any terminal's cursor state changed (needs redraw).
-    pub fn update_all_cursor_blinks(&mut self) -> bool {
+    pub fn update_all_cursor_blinks(&mut self, focused_panel: Option<PanelId>) -> bool {
         let mut any_changed = false;
-        for terminal in self.terminals.values_mut() {
-            if terminal.update_cursor_blink() {
+        for (panel_id, terminal) in self.terminals.iter_mut() {
+            if focused_panel == Some(*panel_id) {
+                if terminal.update_cursor_blink() {
+                    any_changed = true;
+                }
+            } else if !terminal.cursor_blink_visible {
+                terminal.cursor_blink_visible = true;
+                terminal.reset_cursor_blink();
                 any_changed = true;
             }
         }

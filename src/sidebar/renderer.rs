@@ -1,16 +1,18 @@
-use glyphon::cosmic_text::{Attrs, Family, FontSystem, Metrics, Shaping, Weight};
+use glyphon::cosmic_text::{Attrs, Family, FontSystem, Metrics, Shaping, Weight, Wrap};
 use glyphon::{Buffer, Color as GlyphonColor};
 
 use crate::renderer::quad_renderer::QuadInstance;
 use crate::theme::{Theme, linear_to_srgb_u8};
 
-use super::{SidebarState, ENTRY_HEIGHT_PX, SIDEBAR_WIDTH};
+use super::{SidebarState, ENTRY_HEIGHT_PX};
 
 /// Metadata for sidebar text area positioning.
 pub struct SidebarTextAreaMeta {
     pub left: f32,
     pub top: f32,
+    #[allow(dead_code)]
     pub width: f32,
+    #[allow(dead_code)]
     pub height: f32,
 }
 
@@ -33,7 +35,7 @@ impl SidebarRenderer {
         // Sidebar background
         quads.push(QuadInstance {
             position: [0.0, viewport_y],
-            size: [SIDEBAR_WIDTH, viewport_h],
+            size: [state.width, viewport_h],
             color: theme.panel_background,
             corner_radius: 0.0,
             _padding: 0.0,
@@ -47,7 +49,7 @@ impl SidebarRenderer {
             if entry_y + ENTRY_HEIGHT_PX > viewport_y && entry_y < viewport_y + viewport_h {
                 quads.push(QuadInstance {
                     position: [0.0, entry_y],
-                    size: [SIDEBAR_WIDTH, ENTRY_HEIGHT_PX],
+                    size: [state.width, ENTRY_HEIGHT_PX],
                     color: theme.sidebar_selected_bg,
                     corner_radius: 0.0,
                     _padding: 0.0,
@@ -71,7 +73,7 @@ impl SidebarRenderer {
                 if entry_y + ENTRY_HEIGHT_PX > viewport_y && entry_y < viewport_y + viewport_h {
                     quads.push(QuadInstance {
                         position: [0.0, entry_y],
-                        size: [SIDEBAR_WIDTH, ENTRY_HEIGHT_PX],
+                        size: [state.width, ENTRY_HEIGHT_PX],
                         color: theme.sidebar_hover_bg,
                         corner_radius: 0.0,
                         _padding: 0.0,
@@ -103,7 +105,7 @@ impl SidebarRenderer {
         // "FILES" section header (12px semibold)
         let header_metrics = Metrics::new(12.0, 15.6);
         let mut header_buf = Buffer::new(font_system, header_metrics);
-        header_buf.set_size(font_system, Some(SIDEBAR_WIDTH - 32.0), Some(15.6));
+        header_buf.set_size(font_system, Some(state.width - 32.0), Some(15.6));
         let header_attrs = Attrs::new()
             .family(Family::SansSerif)
             .weight(Weight::SEMIBOLD)
@@ -120,7 +122,7 @@ impl SidebarRenderer {
         metas.push(SidebarTextAreaMeta {
             left: 16.0,
             top: header_y,
-            width: SIDEBAR_WIDTH - 32.0,
+            width: state.width - 32.0,
             height: 15.6,
         });
         buffers.push(header_buf);
@@ -176,9 +178,10 @@ impl SidebarRenderer {
                 ));
 
             let mut buf = Buffer::new(font_system, entry_metrics);
+            buf.set_wrap(font_system, Wrap::None);
             buf.set_size(
                 font_system,
-                Some(SIDEBAR_WIDTH - indent - 16.0),
+                Some(state.width - indent - 16.0),
                 Some(ENTRY_HEIGHT_PX),
             );
             let default_attrs = Attrs::new();
@@ -194,7 +197,7 @@ impl SidebarRenderer {
             metas.push(SidebarTextAreaMeta {
                 left: indent,
                 top: entry_y + 3.5, // vertically center in 28px row
-                width: SIDEBAR_WIDTH - indent - 16.0,
+                width: state.width - indent - 16.0,
                 height: ENTRY_HEIGHT_PX,
             });
             buffers.push(buf);
@@ -219,7 +222,7 @@ impl SidebarRenderer {
             let mut btn_buf = Buffer::new(font_system, entry_metrics);
             btn_buf.set_size(
                 font_system,
-                Some(SIDEBAR_WIDTH - 32.0),
+                Some(state.width - 32.0),
                 Some(ENTRY_HEIGHT_PX),
             );
             let default_attrs = Attrs::new();
@@ -235,7 +238,7 @@ impl SidebarRenderer {
             metas.push(SidebarTextAreaMeta {
                 left: 16.0,
                 top: new_canvas_y,
-                width: SIDEBAR_WIDTH - 32.0,
+                width: state.width - 32.0,
                 height: ENTRY_HEIGHT_PX,
             });
             buffers.push(btn_buf);

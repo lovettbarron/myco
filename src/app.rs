@@ -19,7 +19,6 @@ use crate::grid::panel::{Panel, PanelId, PanelType};
 /// Custom event type for waking winit from background threads.
 #[derive(Debug, Clone)]
 pub enum UserEvent {
-    TerminalEvent,
     FileChanged(Vec<std::path::PathBuf>),
     CanvasMessage(PanelId, String),
     ResourceUpdate(Vec<crate::monitor::ResourceUpdate>),
@@ -37,7 +36,7 @@ use crate::renderer::text_renderer::TextLabel;
 use crate::renderer::Renderer;
 use crate::canvas::CanvasManager;
 use crate::markdown::{MarkdownManager, MarkdownRenderer};
-use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_WIDTH};
+use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_EDGE_HIT_ZONE};
 use crate::sidebar::renderer::SidebarRenderer;
 use crate::config::registry::ProjectRegistry;
 use crate::picker::{PickerAction, PickerState};
@@ -223,8 +222,6 @@ pub struct App {
     /// Pending actions to process after the current action completes.
     /// Used to avoid re-entrancy when forwarding IPC shortcuts.
     pending_actions: Vec<InputAction>,
-    /// Whether a redraw has been requested for the current frame.
-    redraw_pending: bool,
     /// Per-frame performance stats, logged every 60 frames at debug level.
     frame_stats: FrameStats,
     /// Display scale factor (2.0 on Retina, 1.0 on standard displays).
@@ -268,6 +265,8 @@ pub struct App {
     toast_manager: crate::toast::ToastManager,
     /// Tooltip state for resource dot hover.
     tooltip_state: Option<TooltipState>,
+    /// Whether the cursor is currently hovering the sidebar resize edge.
+    sidebar_edge_hovered: bool,
     /// Last time the resource monitor was updated with terminal texts.
     /// Initialized to 10 seconds ago so the first update fires immediately.
     last_monitor_update: Instant,
@@ -299,7 +298,6 @@ impl App {
             sidebar_metas: Vec::new(),
             file_watcher: None,
             proxy: Some(proxy),
-            redraw_pending: false,
             frame_stats: FrameStats::new(),
             scale_factor: 1.0,
             init_prompt: InitPrompt::None,
@@ -322,6 +320,7 @@ impl App {
             resource_states: HashMap::new(),
             toast_manager: crate::toast::ToastManager::new(),
             tooltip_state: None,
+            sidebar_edge_hovered: false,
             last_monitor_update: Instant::now() - Duration::from_secs(10),
         }
     }
@@ -1233,6 +1232,18 @@ impl App {
                 #[cfg(target_os = "macos")]
                 self.update_menu_toggles();
             }
+            InputAction::SidebarResizeDrag { delta_pixels } => {
+                if let Some(window) = &self.window {
+                    let win_w = window.inner_size().width as f32 / self.scale_factor;
+                    if let Some(sidebar) = &mut self.sidebar {
+                        sidebar.resize(delta_pixels, win_w);
+                    }
+                    self.sidebar_buffers.clear();
+                    self.sidebar_metas.clear();
+                    self.recompute_layout();
+                    self.resize_terminals();
+                }
+            }
             InputAction::SidebarSelect { path } => {
                 // T-03-09: Validate path is within project directory
                 let is_valid = self
@@ -1347,6 +1358,8 @@ impl App {
                     project_description,
                     project_theme.as_deref(),
                 );
+                let prefs = crate::config::global::load_global_preferences();
+                self.settings.show_git_directory = prefs.show_git_directory;
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -1368,7 +1381,20 @@ impl App {
                     self.terminal_renderer.palette = definition.to_ansi_palette();
                     // 3. Invalidate terminal buffer caches (colors changed, hashes stale)
                     self.terminal_renderer.invalidate_all_caches();
-                    // 4. Request full redraw
+                    // 4. Invalidate markdown buffer caches (theme colors changed)
+                    for panel in &self.panels {
+                        if panel.panel_type == PanelType::Markdown {
+                            self.markdown_renderer.invalidate_panel_cache(&panel.id);
+                        }
+                    }
+                    // 5. Invalidate sidebar buffers (rebuilt next frame)
+                    self.sidebar_buffers.clear();
+                    self.sidebar_metas.clear();
+                    // 6. Trim glyph atlas to flush stale colored glyphs
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.text_engine_mut().trim_atlas();
+                    }
+                    // 7. Request full redraw
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -1675,7 +1701,7 @@ impl App {
     }
 
     /// Get the content bounds (below panel title) for a panel in logical pixels.
-    /// When sidebar is visible, panel x positions are offset by SIDEBAR_WIDTH.
+    /// When sidebar is visible, panel x positions are offset by the sidebar width.
     fn panel_content_bounds(&self, panel_id: PanelId) -> Option<(f32, f32, f32, f32)> {
         let grid = self.grid.as_ref()?;
         let node_id = grid.find_node(panel_id)?;
@@ -1715,13 +1741,18 @@ impl App {
         crate::shortcuts::serialization::save_user_shortcuts(&overrides);
     }
 
-    /// Get the sidebar x offset (SIDEBAR_WIDTH when visible, 0 when hidden).
+    /// Get the sidebar x offset (sidebar width when visible, 0 when hidden).
     fn sidebar_offset(&self) -> f32 {
-        if self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false) {
-            SIDEBAR_WIDTH
+        if let Some(sidebar) = &self.sidebar {
+            if sidebar.visible { sidebar.width } else { 0.0 }
         } else {
             0.0
         }
+    }
+
+    /// Get the current sidebar width (0 if hidden or absent).
+    fn sidebar_width(&self) -> f32 {
+        self.sidebar.as_ref().map(|s| if s.visible { s.width } else { 0.0 }).unwrap_or(0.0)
     }
 
     /// Transition from Picker to Workspace: open a project and initialize workspace.
@@ -1849,7 +1880,8 @@ impl App {
         self.canvas_manager = Some(CanvasManager::new(project_path.clone()));
 
         // Create file sidebar state
-        let mut sidebar = SidebarState::new(project_path.clone());
+        let global_prefs_for_sidebar = crate::config::global::load_global_preferences();
+        let mut sidebar = SidebarState::new(project_path.clone(), global_prefs_for_sidebar.show_git_directory);
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
 
@@ -1977,6 +2009,7 @@ impl App {
     /// Recompute grid layout and divider positions.
     /// D-11: Subtracts sidebar width from available grid width when sidebar is visible.
     fn recompute_layout(&mut self) {
+        let sidebar_w = self.sidebar_width();
         if let (Some(grid), Some(window)) = (self.grid.as_mut(), self.window.as_ref()) {
             let size = window.inner_size();
             if size.width > 0 && size.height > 0 {
@@ -1984,13 +2017,6 @@ impl App {
                 let h = size.height as f32 / self.scale_factor;
                 // Deduct title bar + stats bar from top, bottom bar from bottom
                 let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
-
-                // D-11: Subtract sidebar width when visible
-                let sidebar_w = if self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false) {
-                    SIDEBAR_WIDTH
-                } else {
-                    0.0
-                };
                 let grid_width = w - sidebar_w;
 
                 grid.compute(grid_width, grid_height.max(1.0));
@@ -3105,7 +3131,6 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::TerminalEvent => {}
             UserEvent::CanvasMessage(panel_id, msg) => {
                 self.process_action(InputAction::CanvasIpcMessage { panel_id, message: msg });
             }
@@ -3362,7 +3387,8 @@ impl ApplicationHandler<UserEvent> for App {
         self.canvas_manager = Some(CanvasManager::new(project_dir.clone()));
 
         // Create file sidebar state with project registry data
-        let mut sidebar = SidebarState::new(project_dir.clone());
+        let global_prefs_for_sidebar = crate::config::global::load_global_preferences();
+        let mut sidebar = SidebarState::new(project_dir.clone(), global_prefs_for_sidebar.show_git_directory);
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
 
@@ -3547,9 +3573,53 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
-                // Update sidebar hover state
+                // Sidebar edge resize cursor
                 let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
-                if sidebar_visible && (lx as f32) < SIDEBAR_WIDTH && (ly as f32) > TOP_CHROME_HEIGHT {
+                let sidebar_w = self.sidebar_width();
+
+                if sidebar_visible && matches!(self.mouse_state.drag, crate::input::mouse::DragState::DraggingSidebar { .. }) {
+                    let old_x = match &self.mouse_state.drag {
+                        crate::input::mouse::DragState::DraggingSidebar { last_x } => *last_x,
+                        _ => lx,
+                    };
+                    let delta = (lx - old_x) as f32;
+                    self.mouse_state.cursor_x = lx;
+                    self.mouse_state.cursor_y = ly;
+                    self.mouse_state.drag = crate::input::mouse::DragState::DraggingSidebar { last_x: lx };
+                    let win_w = self.window.as_ref()
+                        .map(|w| w.inner_size().width as f32 / self.scale_factor)
+                        .unwrap_or(1440.0);
+                    if let Some(sidebar) = &mut self.sidebar {
+                        sidebar.resize(delta, win_w);
+                    }
+                    self.sidebar_buffers.clear();
+                    self.sidebar_metas.clear();
+                    self.recompute_layout();
+                    self.resize_terminals();
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+
+                // Show resize cursor when hovering the sidebar edge
+                let hovering_sidebar_edge = sidebar_visible
+                    && (ly as f32) > TOP_CHROME_HEIGHT
+                    && (lx as f32 - sidebar_w).abs() < SIDEBAR_EDGE_HIT_ZONE;
+
+                if hovering_sidebar_edge {
+                    if let Some(window) = &self.window {
+                        window.set_cursor(CursorIcon::ColResize);
+                    }
+                } else if self.sidebar_edge_hovered {
+                    if let Some(window) = &self.window {
+                        window.set_cursor(CursorIcon::Default);
+                    }
+                }
+                self.sidebar_edge_hovered = hovering_sidebar_edge;
+
+                // Update sidebar hover state
+                if sidebar_visible && (lx as f32) < sidebar_w && (ly as f32) > TOP_CHROME_HEIGHT {
                     let sidebar_y = ly as f32 - TOP_CHROME_HEIGHT;
                     if let Some(sidebar) = &mut self.sidebar {
                         let prev = sidebar.hovered;
@@ -3612,7 +3682,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.open_project(path);
                             }
                             PickerAction::OpenFolderDialog => {
-                                info!("Open folder dialog requested (deferred)");
+                                #[cfg(target_os = "macos")]
+                                if let Some(mtm) = objc2_foundation::MainThreadMarker::new() {
+                                    if let Some(path) = crate::platform::dialog::pick_folder(mtm) {
+                                        self.open_project(path);
+                                    }
+                                }
                             }
                             PickerAction::LocateProject(_idx) => {
                                 info!("Locate project requested (deferred)");
@@ -3670,6 +3745,15 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             self.auto_save.mark_dirty();
                         }
+                        SettingsClickResult::ShowGitDirectoryToggled(show) => {
+                            if let Some(sidebar) = &mut self.sidebar {
+                                sidebar.show_git_directory = show;
+                                sidebar.refresh_file_tree();
+                            }
+                            let mut prefs = crate::config::global::load_global_preferences();
+                            prefs.show_git_directory = show;
+                            crate::config::global::save_global_preferences(&prefs);
+                        }
                         SettingsClickResult::ShortcutRecordingStarted
                         | SettingsClickResult::SectionChanged
                         | SettingsClickResult::Consumed => {}
@@ -3683,10 +3767,36 @@ impl ApplicationHandler<UserEvent> for App {
                 let lx = self.mouse_state.cursor_x as f32;
                 let ly = self.mouse_state.cursor_y as f32;
 
-                // Check if click is in the sidebar region
+                // Check sidebar edge drag (resize)
                 let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
+                let sidebar_w = self.sidebar_width();
                 if sidebar_visible
-                    && lx < SIDEBAR_WIDTH
+                    && (lx - sidebar_w).abs() < SIDEBAR_EDGE_HIT_ZONE
+                    && ly > TOP_CHROME_HEIGHT
+                    && state == ElementState::Pressed
+                    && button == MouseButton::Left
+                {
+                    self.mouse_state.drag = crate::input::mouse::DragState::DraggingSidebar {
+                        last_x: lx as f64,
+                    };
+                    return;
+                }
+
+                // End sidebar drag on release
+                if matches!(self.mouse_state.drag, crate::input::mouse::DragState::DraggingSidebar { .. })
+                    && state == ElementState::Released
+                    && button == MouseButton::Left
+                {
+                    self.mouse_state.drag = crate::input::mouse::DragState::Idle;
+                    if let Some(window) = &self.window {
+                        window.set_cursor(CursorIcon::Default);
+                    }
+                    return;
+                }
+
+                // Check if click is in the sidebar region
+                if sidebar_visible
+                    && lx < sidebar_w
                     && ly > TOP_CHROME_HEIGHT
                     && state == ElementState::Pressed
                     && button == MouseButton::Left
@@ -3727,7 +3837,7 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 } else if sidebar_visible
-                    && lx < SIDEBAR_WIDTH
+                    && lx < sidebar_w
                     && ly > TOP_CHROME_HEIGHT
                     && state == ElementState::Pressed
                     && button == MouseButton::Right
@@ -3782,7 +3892,7 @@ impl ApplicationHandler<UserEvent> for App {
 
                 // If mouse is over sidebar, scroll sidebar instead of panels
                 let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
-                if sidebar_visible && lx < SIDEBAR_WIDTH {
+                if sidebar_visible && lx < self.sidebar_width() {
                     let pixel_delta = match delta {
                         winit::event::MouseScrollDelta::LineDelta(_, y) => y * 21.0,
                         winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
@@ -3856,6 +3966,9 @@ impl ApplicationHandler<UserEvent> for App {
                         Key::Named(NamedKey::Escape) => {
                             self.picker_state.as_ref().map(|p| p.handle_key_escape())
                         }
+                        Key::Character(c) if self.modifiers.super_key() && c.as_str() == "o" => {
+                            Some(PickerAction::OpenFolderDialog)
+                        }
                         Key::Character(c) if self.modifiers.super_key() && c.as_str() == "q" => {
                             event_loop.exit();
                             None
@@ -3868,8 +3981,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.open_project(path);
                             }
                             PickerAction::OpenFolderDialog => {
-                                // Deferred: folder dialog requires platform-specific code
-                                info!("Open folder dialog requested (deferred)");
+                                #[cfg(target_os = "macos")]
+                                if let Some(mtm) = objc2_foundation::MainThreadMarker::new() {
+                                    if let Some(path) = crate::platform::dialog::pick_folder(mtm) {
+                                        self.open_project(path);
+                                    }
+                                }
                             }
                             PickerAction::LocateProject(_idx) => {
                                 info!("Locate project requested (deferred)");
@@ -4288,31 +4405,38 @@ impl ApplicationHandler<UserEvent> for App {
                     }
 
                     // Phase 2: Collect cached TextAreas and render
-                    let mut terminal_text_areas = self.terminal_renderer.collect_text_areas(s);
-                    // Append markdown text areas to the same vec
-                    terminal_text_areas.extend(self.markdown_renderer.collect_text_areas(s));
+                    // When settings overlay is visible, skip panel/sidebar text to
+                    // prevent it rendering on top of the settings background.
+                    let terminal_text_areas = if self.settings.visible {
+                        Vec::new()
+                    } else {
+                        let mut areas = self.terminal_renderer.collect_text_areas(s);
+                        areas.extend(self.markdown_renderer.collect_text_areas(s));
 
-                    // Append sidebar text areas
-                    {
-                        use glyphon::{TextArea, TextBounds};
-                        let default_color = glyphon::Color::rgba(248, 248, 242, 255);
-                        for (buf, meta) in self.sidebar_buffers.iter().zip(self.sidebar_metas.iter()) {
-                            terminal_text_areas.push(TextArea {
-                                buffer: buf,
-                                left: meta.left * s,
-                                top: meta.top * s,
-                                scale: s,
-                                bounds: TextBounds {
-                                    left: 0,
-                                    top: (TOP_CHROME_HEIGHT * s) as i32,
-                                    right: (SIDEBAR_WIDTH * s) as i32,
-                                    bottom: ((logical_h - BOTTOM_BAR_HEIGHT) * s) as i32,
-                                },
-                                default_color,
-                                custom_glyphs: &[],
-                            });
+                        // Append sidebar text areas
+                        {
+                            use glyphon::{TextArea, TextBounds};
+                            let default_color = glyphon::Color::rgba(248, 248, 242, 255);
+                            for (buf, meta) in self.sidebar_buffers.iter().zip(self.sidebar_metas.iter()) {
+                                areas.push(TextArea {
+                                    buffer: buf,
+                                    left: meta.left * s,
+                                    top: meta.top * s,
+                                    scale: s,
+                                    bounds: TextBounds {
+                                        left: 0,
+                                        top: (TOP_CHROME_HEIGHT * s) as i32,
+                                        right: (self.sidebar_width() * s) as i32,
+                                        bottom: ((logical_h - BOTTOM_BAR_HEIGHT) * s) as i32,
+                                    },
+                                    default_color,
+                                    custom_glyphs: &[],
+                                });
+                            }
                         }
-                    }
+
+                        areas
+                    };
 
                     if let Some(renderer) = &mut self.renderer {
                         match renderer.render(
@@ -4359,7 +4483,7 @@ impl ApplicationHandler<UserEvent> for App {
             if tm.drain_all_events() {
                 needs_render = true;
             }
-            if tm.update_all_cursor_blinks() {
+            if tm.update_all_cursor_blinks(self.focused_panel) {
                 needs_render = true;
             }
             for ts in tm.terminals_mut().values_mut() {

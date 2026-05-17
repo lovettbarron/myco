@@ -18,8 +18,8 @@ pub struct Modifiers {
     pub alt: bool,
 }
 
+#[allow(dead_code)]
 impl Modifiers {
-    /// Convenience: Cmd only.
     pub fn cmd() -> Self {
         Self {
             cmd: true,
@@ -75,8 +75,8 @@ pub struct KeyCombo {
     pub modifiers: Modifiers,
 }
 
+#[allow(dead_code)]
 impl KeyCombo {
-    /// Create a new KeyCombo with the given key and modifiers.
     pub fn new(key: &str, modifiers: Modifiers) -> Self {
         Self {
             key: key.to_string(),
@@ -255,7 +255,7 @@ impl ChordStateMachine {
         false
     }
 
-    /// Force-reset to Idle state.
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.state = ChordState::Idle;
     }

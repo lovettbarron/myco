@@ -219,9 +219,11 @@ pub fn build_labels(
         }
     }
 
-    // "Open Folder..." button area
+    // "Open Folder..." button area — offset below empty state text when no entries
+    let empty_state_height = if state.entries.is_empty() { 80.0 } else { 0.0 };
     let open_folder_y = title_area
         + (state.entries.len() as f32 * (CARD_HEIGHT + CARD_SPACING))
+        + empty_state_height
         + 8.0;
     let _ = OPEN_FOLDER_HEIGHT; // used for hit testing in mod.rs
 

@@ -8,7 +8,7 @@ use crate::renderer::quad_renderer::QuadInstance;
 use crate::theme::Theme;
 
 use super::layout;
-use super::parser::{BlockType, MarkdownBlock};
+use super::parser::{BlockType, MarkdownBlock, TableAlign};
 
 /// Cached markdown rendering state for a single panel.
 struct PanelMarkdownCache {
@@ -29,8 +29,145 @@ struct PanelMarkdownCache {
 struct MarkdownTextAreaMeta {
     left: f32,
     top: f32,
+    #[allow(dead_code)]
     width: f32,
+    #[allow(dead_code)]
     height: f32,
+}
+
+/// Approximate monospace character width at 14px font size.
+const MONO_CHAR_WIDTH: f32 = 8.4;
+/// Column separator width in characters.
+const COL_GAP_CHARS: usize = 2;
+/// Minimum characters per column.
+const MIN_COL_CHARS: usize = 4;
+
+/// Format a table into monospace-aligned text with padded columns.
+/// `available_px` is the pixel width available for the table content.
+fn format_table_text(
+    alignments: &[TableAlign],
+    header: &[String],
+    rows: &[Vec<String>],
+    available_px: f32,
+) -> String {
+    let col_count = alignments.len().max(header.len());
+    if col_count == 0 {
+        return String::new();
+    }
+
+    let max_chars = (available_px / MONO_CHAR_WIDTH) as usize;
+    let gap_total = COL_GAP_CHARS * col_count.saturating_sub(1);
+    let budget = max_chars.saturating_sub(gap_total);
+
+    // Natural column widths (longest cell per column)
+    let mut natural = vec![0usize; col_count];
+    for (i, cell) in header.iter().enumerate() {
+        if i < col_count {
+            natural[i] = natural[i].max(cell.len());
+        }
+    }
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i < col_count {
+                natural[i] = natural[i].max(cell.len());
+            }
+        }
+    }
+    for w in natural.iter_mut() {
+        *w = (*w).max(MIN_COL_CHARS);
+    }
+
+    let natural_total: usize = natural.iter().sum();
+    let col_widths: Vec<usize> = if natural_total <= budget {
+        natural
+    } else {
+        // Proportionally shrink columns to fit the budget
+        let mut widths = vec![MIN_COL_CHARS; col_count];
+        let distributable = budget.saturating_sub(MIN_COL_CHARS * col_count);
+        let natural_over_min: usize = natural
+            .iter()
+            .map(|w| w.saturating_sub(MIN_COL_CHARS))
+            .sum();
+        if natural_over_min > 0 {
+            for (i, nat) in natural.iter().enumerate() {
+                let extra = nat.saturating_sub(MIN_COL_CHARS);
+                widths[i] = MIN_COL_CHARS + (extra * distributable) / natural_over_min;
+            }
+        }
+        widths
+    };
+
+    let mut output = String::new();
+
+    if !header.is_empty() {
+        format_row(&mut output, header, &col_widths, alignments, col_count);
+    }
+    for row in rows {
+        format_row(&mut output, row, &col_widths, alignments, col_count);
+    }
+
+    if output.ends_with('\n') {
+        output.pop();
+    }
+    output
+}
+
+/// Truncate a string to `max_len` characters, appending "…" if truncated.
+fn truncate_cell(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+    if max_len <= 1 {
+        return "\u{2026}".to_string();
+    }
+    let mut result: String = s.chars().take(max_len - 1).collect();
+    result.push('\u{2026}');
+    result
+}
+
+fn format_row(
+    output: &mut String,
+    cells: &[String],
+    col_widths: &[usize],
+    alignments: &[TableAlign],
+    col_count: usize,
+) {
+    for i in 0..col_count {
+        if i > 0 {
+            output.push_str("  ");
+        }
+        let raw = cells.get(i).map(|s| s.as_str()).unwrap_or("");
+        let width = col_widths[i];
+        let cell = truncate_cell(raw, width);
+        let cell_len = cell.chars().count();
+        let align = alignments.get(i).copied().unwrap_or(TableAlign::None);
+        match align {
+            TableAlign::Right => {
+                for _ in 0..(width.saturating_sub(cell_len)) {
+                    output.push(' ');
+                }
+                output.push_str(&cell);
+            }
+            TableAlign::Center => {
+                let pad = width.saturating_sub(cell_len);
+                let left_pad = pad / 2;
+                for _ in 0..left_pad {
+                    output.push(' ');
+                }
+                output.push_str(&cell);
+                for _ in 0..(pad - left_pad) {
+                    output.push(' ');
+                }
+            }
+            _ => {
+                output.push_str(&cell);
+                for _ in 0..(width.saturating_sub(cell_len)) {
+                    output.push(' ');
+                }
+            }
+        }
+    }
+    output.push('\n');
 }
 
 /// GPU renderer for markdown blocks.
@@ -93,17 +230,58 @@ impl MarkdownRenderer {
         for i in first..last {
             let block = &blocks[i];
             if block.block_type == BlockType::HorizontalRule {
-                continue; // HR is rendered as a quad only, no text
-            }
-            if block.spans.is_empty() {
                 continue;
             }
 
             let block_y = layout::block_y_position(block_heights, i) - scroll_offset;
+
+            // Table blocks: format as monospace-aligned text with truncation
+            if let BlockType::Table { alignments, header, rows } = &block.block_type {
+                let table_text = format_table_text(alignments, header, rows, available_width);
+                if table_text.is_empty() {
+                    continue;
+                }
+                let font_size = layout::BODY_FONT_SIZE;
+                let line_height = layout::TABLE_ROW_H;
+                let metrics = Metrics::new(font_size, line_height);
+                let mut buffer = Buffer::new(font_system, metrics);
+                // Use a very wide size to prevent glyphon from wrapping — we already truncated
+                buffer.set_size(font_system, Some(available_width * 2.0), None);
+
+                let table_attrs = Attrs::new()
+                    .family(glyphon::cosmic_text::Family::Monospace)
+                    .weight(glyphon::cosmic_text::Weight::NORMAL)
+                    .color(glyphon::cosmic_text::Color::rgb(248, 248, 242));
+                buffer.set_rich_text(
+                    font_system,
+                    std::iter::once((table_text.as_str(), table_attrs)),
+                    &Attrs::new(),
+                    Shaping::Advanced,
+                    None,
+                );
+                buffer.shape_until_scroll(font_system, false);
+
+                let top = viewport_y + block_y + layout::TABLE_PAD;
+                let left = viewport_x + content_padding;
+                let layout_height = buffer.layout_runs().count().max(1) as f32 * line_height;
+
+                metas.push(MarkdownTextAreaMeta {
+                    left,
+                    top,
+                    width: available_width,
+                    height: layout_height,
+                });
+                buffers.push((i, buffer));
+                continue;
+            }
+
+            if block.spans.is_empty() {
+                continue;
+            }
+
             let font_size = layout::font_size_for_block(&block.block_type);
             let line_height = layout::line_height_for_block(&block.block_type);
 
-            // Calculate x offset for indented blocks
             let x_offset = match &block.block_type {
                 BlockType::ListItem { depth, .. } | BlockType::TaskListItem { depth, .. } => {
                     content_padding + (*depth as f32 + 1.0) * 16.0
@@ -119,7 +297,6 @@ impl MarkdownRenderer {
             let mut buffer = Buffer::new(font_system, metrics);
             buffer.set_size(font_system, Some(buffer_width), None);
 
-            // Build spans with list markers prepended
             let mut render_spans: Vec<(String, Attrs<'static>)> = Vec::new();
             if let BlockType::ListItem { ordered, .. } = &block.block_type {
                 let marker = if *ordered {
@@ -136,7 +313,6 @@ impl MarkdownRenderer {
             }
             render_spans.extend(block.spans.iter().cloned());
 
-            // Convert to the format set_rich_text expects: (&str, Attrs)
             let span_refs: Vec<(&str, Attrs<'static>)> = render_spans
                 .iter()
                 .map(|(text, attrs)| (text.as_str(), attrs.clone()))
@@ -155,7 +331,6 @@ impl MarkdownRenderer {
             let top = viewport_y + block_y;
             let left = viewport_x + x_offset;
 
-            // Estimate block height from the number of layout lines
             let layout_height = buffer
                 .layout_runs()
                 .count()
@@ -231,6 +406,7 @@ impl MarkdownRenderer {
     }
 
     /// Build decoration quads for markdown blocks (code block bgs, blockquote borders, HRs).
+    /// All quads are clipped to the viewport bounds.
     pub fn build_quads(
         blocks: &[MarkdownBlock],
         block_heights: &[f32],
@@ -243,6 +419,8 @@ impl MarkdownRenderer {
     ) -> Vec<QuadInstance> {
         let mut quads = Vec::new();
         let content_padding = layout::CONTENT_PADDING;
+        let vp_top = viewport_y;
+        let vp_bottom = viewport_y + viewport_h;
 
         let (first, last) = layout::visible_block_range(block_heights, scroll_offset, viewport_h);
 
@@ -254,42 +432,113 @@ impl MarkdownRenderer {
 
             match &block.block_type {
                 BlockType::CodeBlock(_) => {
-                    // Code block background quad
-                    quads.push(QuadInstance {
-                        position: [viewport_x + content_padding - 8.0, top],
-                        size: [
-                            viewport_w - content_padding * 2.0 + 16.0,
-                            block_h - 16.0,
-                        ],
-                        color: theme.markdown_code_block_bg,
-                        corner_radius: 4.0,
-                        _padding: 0.0,
-                    });
+                    if let Some(q) = clip_quad(
+                        viewport_x + content_padding - 8.0,
+                        top,
+                        viewport_w - content_padding * 2.0 + 16.0,
+                        block_h - 16.0,
+                        theme.markdown_code_block_bg,
+                        4.0,
+                        vp_top,
+                        vp_bottom,
+                    ) {
+                        quads.push(q);
+                    }
                 }
                 BlockType::BlockQuote => {
-                    // Left border stripe (3px wide)
-                    quads.push(QuadInstance {
-                        position: [viewport_x + content_padding, top],
-                        size: [3.0, block_h - 16.0],
-                        color: theme.markdown_blockquote_border,
-                        corner_radius: 0.0,
-                        _padding: 0.0,
-                    });
+                    if let Some(q) = clip_quad(
+                        viewport_x + content_padding,
+                        top,
+                        3.0,
+                        block_h - 16.0,
+                        theme.markdown_blockquote_border,
+                        0.0,
+                        vp_top,
+                        vp_bottom,
+                    ) {
+                        quads.push(q);
+                    }
                 }
                 BlockType::HorizontalRule => {
-                    // 1px horizontal line
-                    quads.push(QuadInstance {
-                        position: [viewport_x + content_padding, top + 8.0],
-                        size: [viewport_w - content_padding * 2.0, 1.0],
-                        color: theme.markdown_hr,
-                        corner_radius: 0.0,
-                        _padding: 0.0,
-                    });
+                    if let Some(q) = clip_quad(
+                        viewport_x + content_padding,
+                        top + 8.0,
+                        viewport_w - content_padding * 2.0,
+                        1.0,
+                        theme.markdown_hr,
+                        0.0,
+                        vp_top,
+                        vp_bottom,
+                    ) {
+                        quads.push(q);
+                    }
                 }
-                _ => {} // No decoration for paragraphs, headings, list items
+                BlockType::Table { header, rows, .. } => {
+                    let table_width = viewport_w - content_padding * 2.0;
+                    let table_top = top + layout::TABLE_PAD;
+                    let quad_x = viewport_x + content_padding - 4.0;
+                    let quad_w = table_width + 8.0;
+
+                    if !header.is_empty() {
+                        if let Some(q) = clip_quad(
+                            quad_x, table_top, quad_w, layout::TABLE_ROW_H,
+                            theme.markdown_table_header_bg, 2.0, vp_top, vp_bottom,
+                        ) {
+                            quads.push(q);
+                        }
+                        if let Some(q) = clip_quad(
+                            quad_x, table_top + layout::TABLE_ROW_H, quad_w, 1.0,
+                            theme.markdown_table_border, 0.0, vp_top, vp_bottom,
+                        ) {
+                            quads.push(q);
+                        }
+                    }
+
+                    let header_offset = if header.is_empty() { 0 } else { 1 };
+                    for row_idx in 1..rows.len() {
+                        let row_y = table_top
+                            + (header_offset + row_idx) as f32 * layout::TABLE_ROW_H;
+                        if let Some(q) = clip_quad(
+                            quad_x, row_y, quad_w, 1.0,
+                            theme.markdown_table_border, 0.0, vp_top, vp_bottom,
+                        ) {
+                            quads.push(q);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
         quads
     }
+}
+
+/// Clip a quad vertically to viewport bounds. Returns None if fully outside.
+fn clip_quad(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    color: [f32; 4],
+    corner_radius: f32,
+    vp_top: f32,
+    vp_bottom: f32,
+) -> Option<QuadInstance> {
+    let bottom = y + h;
+    if bottom <= vp_top || y >= vp_bottom {
+        return None;
+    }
+    let clipped_y = y.max(vp_top);
+    let clipped_h = bottom.min(vp_bottom) - clipped_y;
+    if clipped_h <= 0.0 {
+        return None;
+    }
+    Some(QuadInstance {
+        position: [x, clipped_y],
+        size: [w, clipped_h],
+        color,
+        corner_radius,
+        _padding: 0.0,
+    })
 }

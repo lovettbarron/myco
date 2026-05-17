@@ -43,6 +43,10 @@ pub enum DragState {
     DraggingTerminalSelection {
         panel_id: PanelId,
     },
+    /// Dragging the sidebar edge to resize.
+    DraggingSidebar {
+        last_x: f64,
+    },
 }
 
 /// Mouse input state tracking.
@@ -144,6 +148,11 @@ impl MouseState {
                     x: x as f32,
                     y: y as f32,
                 });
+            }
+            DragState::DraggingSidebar { last_x } => {
+                let delta = x - *last_x;
+                *last_x = x;
+                actions.push(InputAction::SidebarResizeDrag { delta_pixels: delta as f32 });
             }
         }
 
@@ -264,8 +273,6 @@ impl MouseState {
                         let rel_x = x as f32 - px;
                         let rel_y = y as f32 - py_offset;
 
-                        // Determine direction: if cursor is in left/right third, split horizontal.
-                        // If in top/bottom third, split vertical. Center defaults to horizontal.
                         let x_third = pw / 3.0;
                         let y_third = ph / 3.0;
                         let in_horizontal_third = rel_x < x_third || rel_x > x_third * 2.0;
@@ -274,7 +281,6 @@ impl MouseState {
                         if in_vertical_third && !in_horizontal_third {
                             actions.push(InputAction::PanelSplitVertical { panel_id });
                         } else {
-                            // Default to horizontal split (including center and left/right edges)
                             actions.push(InputAction::PanelSplitHorizontal { panel_id });
                         }
                     }
@@ -326,6 +332,9 @@ impl MouseState {
             DragState::DraggingTerminalSelection { panel_id } => {
                 let pid = *panel_id;
                 actions.push(InputAction::TerminalSelectionEnd { panel_id: pid });
+                self.drag = DragState::Idle;
+            }
+            DragState::DraggingSidebar { .. } => {
                 self.drag = DragState::Idle;
             }
             DragState::Idle => {}
