@@ -50,6 +50,9 @@ dirs = "6.0.0"
 # Git integration
 git2 = "0.20"
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.dev.package."*"]
 opt-level = 2
 
