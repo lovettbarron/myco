@@ -35,7 +35,7 @@ Declared values (must be multiples of 4):
 |-------|-------|-------|
 | xs | 4px | Icon gaps, inline padding, accent bar width (2px exception) |
 | sm | 8px | Compact element spacing, panel content padding, key-badge internal padding |
-| md | 16px | Default element spacing, paragraph gaps, content padding |
+| md | 16px | Default element spacing, paragraph gaps, content padding, notification toast horizontal padding |
 | lg | 24px | Section padding, project picker card padding |
 | xl | 32px | Project picker card spacing, large heading top margins |
 | 2xl | 48px | Major section breaks |
@@ -73,15 +73,16 @@ Source: Phase 4 UI-SPEC typography (unchanged)
 |------|-------|-------|
 | Dominant (60%) | #282A36 (bg_primary) | Project picker background, settings background, workspace background |
 | Secondary (30%) | #2C2E3B / #44475A (bg_secondary / bg_tertiary) | Project list cards, shortcut row backgrounds, key badges, sidebar project section |
-| Accent (10%) | #BD93F9 (accent) | Active project indicator, key-recording focus ring, "Locate" action text, active shortcut row highlight |
+| Accent (10%) | #BD93F9 (accent) | Active project indicator, key-recording focus ring, "Locate Folder" action text, active shortcut row highlight |
 | Destructive | #FF5555 (error) | "Remove Project" text, conflict notification accent |
 
 Accent reserved for:
 - Active project indicator bar (2px left edge) in project picker and sidebar
 - Key-recording mode focus ring (2px border around the shortcut row being recorded)
-- "Locate" link-style text for missing project folders
+- "Locate Folder" link-style text for missing project folders
 - Conflict resolution notification accent bar
 - Active/selected shortcut row left indicator
+- "Undo" action link in notification toast
 
 Source: Phase 4 UI-SPEC color architecture (extended for Phase 5 elements)
 
@@ -92,6 +93,8 @@ Source: Phase 4 UI-SPEC color architecture (extended for Phase 5 elements)
 ### 1. Project Picker (D-09, D-13)
 
 GPU-rendered fullscreen view shown at launch when no CLI argument is provided.
+
+Primary focal point: project list cards.
 
 | Element | Spec |
 |---------|------|
@@ -116,7 +119,7 @@ GPU-rendered fullscreen view shown at launch when no CLI argument is provided.
 | Status dot | 8px circle, right-aligned, vertically centered. green (success) = running processes, gray (fg_secondary) = idle |
 | Hover | bg_tertiary background |
 | Click | Open project, transition to workspace |
-| Missing folder (D-12) | Card text at 50% opacity (fg_secondary for name too), path shows "[Folder not found]" in error color. "Locate" link-text in accent color, right-aligned where status dot would be |
+| Missing folder (D-12) | Card text at 50% opacity (fg_secondary for name too), path shows "[Folder not found]" in error color. "Locate Folder" link-text in accent color, right-aligned where status dot would be |
 | Max visible | 8 cards before scroll (384px list height). Overflow scrolls with mouse wheel. |
 
 #### Bottom Actions
@@ -197,7 +200,7 @@ Extends the existing Settings overlay (Cmd+,) Shortcuts section from placeholder
 | Visual | Row background changes to bg_tertiary. Key badge area replaced with pulsing accent-color border (2px, 0.5s pulse cycle). Text "Press keys..." in 13px fg_secondary where badge was. |
 | Chord support (D-15) | After first key combo registered, badge appears. 1-second timeout for second key in chord. If second key pressed within timeout, chord recorded. If timeout expires, single combo saved. |
 | Cancel | Esc cancels recording, restores original binding |
-| Conflict (D-16) | If new binding conflicts, row saves the new binding. A notification toast appears at bottom-right: "Cmd+D removed from Panel Split" (13px fg_primary on bg_secondary, 4px corner radius, 240px wide, auto-dismiss after 3 seconds). Accent left bar (2px) on notification. |
+| Conflict (D-16) | If new binding conflicts, row saves the new binding. A notification toast appears at bottom-right (see Notification Toast section). Toast includes an "Undo" action link to restore the previous binding. |
 | Backspace/Delete | Clears binding for this action (sets to "none") |
 
 ### 4. Settings -- Project Section
@@ -228,10 +231,11 @@ Extends the existing Settings overlay Project section from placeholder to functi
 | Project picker empty state heading | "No Recent Projects" |
 | Project picker empty state body | "Open a project folder to get started. It will appear here next time." |
 | Project picker open action | "Open Folder..." |
-| Project picker missing folder | "[Folder not found]" (path text), "Locate" (action link) |
+| Project picker missing folder | "[Folder not found]" (path text), "Locate Folder" (action link) |
 | Settings shortcuts recording | "Press keys..." |
 | Settings shortcuts no binding | "none" |
 | Shortcut conflict notification | "{key combo} removed from {action name}" |
+| Shortcut conflict undo | "Undo" (accent-color action link in notification toast, restores previous binding) |
 | Project section no description | "No description" |
 | Project section theme override | "Global Default" (first option in theme dropdown) |
 | Error: config parse failure | "Could not read project config. Using defaults." |
@@ -296,9 +300,16 @@ User clicks shortcut row:
   5a. If second key combo within timeout: record as chord, save
   5b. If timeout expires: record as single combo, save
   6. Check conflicts against all other bindings
-  7. If conflict: override silently, show notification toast
+  7. If conflict: override silently, show notification toast with "Undo" link
   8. Write sparse overrides to ~/.myco/shortcuts.json (D-18)
   9. Exit recording mode, display new badge(s)
+
+Undo flow (from notification toast):
+  7a. User clicks "Undo" within 3-second auto-dismiss window
+  7b. Restore previous binding for the displaced action
+  7c. Remove the new binding (revert to previous state for both actions)
+  7d. Dismiss notification immediately
+  7e. Re-write ~/.myco/shortcuts.json with restored state
 ```
 
 ### Project Switch (sidebar)
@@ -414,9 +425,10 @@ Sparse format (D-18): only overridden bindings stored. Missing actions use built
 | Background | bg_secondary |
 | Corner radius | 4px |
 | Left accent | 2px accent-color bar, full height |
-| Content padding | 12px horizontal (after accent bar), 8px vertical |
+| Content padding | 16px horizontal (after accent bar), 8px vertical |
 | Text | 13px fg_primary, single line: "{key combo} removed from {action name}" |
-| Auto-dismiss | 3 seconds, no manual dismiss button |
+| Undo action | "Undo" text in accent color (13px), right-aligned within toast, 16px left margin from message text. Click restores previous binding (see Shortcut Rebinding undo flow). |
+| Auto-dismiss | 3 seconds. If user clicks "Undo" before timeout, dismiss immediately. |
 | Animation | None in v1 (instant show/hide). Fade-in/out deferred. |
 | Stacking | Max 2 visible. Newer pushes older up by toast height + 8px gap. |
 
