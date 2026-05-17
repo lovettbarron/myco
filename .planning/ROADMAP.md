@@ -19,6 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 5: Configuration and Persistence** - Project config, global config, layout save/restore, keyboard shortcuts
 - [ ] **Phase 6: AI Monitoring and Ship** - Process monitoring, intervention toasts, and v1 distribution readiness
 - [ ] **Phase 7: Testing Infrastructure** - Headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, and criterion benchmarks
+- [ ] **Phase 8: Agent Monitor Cap** - Dedicated GPU-rendered panel showing running AI agent sessions with status, token usage, running time, and intervention history
 
 ## Phase Details
 
@@ -174,10 +175,27 @@ Plans:
 - [ ] 07-02-PLAN.md -- Headless GPU snapshot tests with golden image comparison (TEST-01)
 - [ ] 07-03-PLAN.md -- Property-based fuzzing (proptest) and criterion benchmarks (TEST-04, TEST-05)
 
+### Phase 8: Agent Monitor Cap
+**Goal**: User can open a dedicated panel that displays all running AI agent sessions with real-time status, resource usage, token spend, and intervention history — promoting the toast-based monitoring from Phase 6 into a full first-class cap
+**Mode:** mvp
+**Depends on**: Phase 6, Phase 7
+**Requirements**: AGENT-01, AGENT-02, AGENT-03, AGENT-04
+**Success Criteria** (what must be TRUE):
+  1. User can open an Agent Monitor panel in the grid that lists all detected AI processes (Claude Code, Cursor, etc.) with their status (running/waiting/idle/frozen)
+  2. Each agent entry shows real-time CPU/RAM, running time, and accumulated token usage (where detectable from terminal output)
+  3. User can click an agent entry to focus the terminal panel running that agent, or freeze/unfreeze it directly from the monitor
+  4. Agent monitor shows intervention history (past alerts with timestamps) and current intervention state per agent
+**Plans**: TBD
+
+Plans:
+- [ ] 08-01-PLAN.md -- Agent discovery and data model (detect AI processes, AgentSession struct, background polling)
+- [ ] 08-02-PLAN.md -- GPU-rendered monitor panel (new PanelType::AgentMonitor, list rendering, status indicators)
+- [ ] 08-03-PLAN.md -- Interactions and token tracking (click-to-focus, freeze controls, terminal output token parsing, intervention history)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 if resources allow.
 
 | Phase | Plans Complete | Status | Completed |
@@ -189,3 +207,4 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | 5. Configuration and Persistence | 4/5 | Gap closure | - |
 | 6. AI Monitoring and Ship | 0/3 | Planning complete | - |
 | 7. Testing Infrastructure | 0/3 | Planning complete | - |
+| 8. Agent Monitor Cap | 0/3 | Not started | - |
