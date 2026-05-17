@@ -1353,6 +1353,10 @@ impl App {
                 // Open new project
                 self.open_project(path);
             }
+            InputAction::Quit => {
+                // Handled in window_event before reaching process_action.
+                // This arm exists only for exhaustive match coverage.
+            }
         }
     }
 
@@ -3395,6 +3399,29 @@ impl ApplicationHandler<UserEvent> for App {
                     &mut self.chord_state,
                 );
                 for action in actions {
+                    if matches!(action, InputAction::Quit) {
+                        // Save config on quit (same logic as CloseRequested)
+                        if let (Some(grid), Some(project_dir)) =
+                            (&self.grid, &self.project_dir)
+                        {
+                            let config =
+                                crate::config::ProjectConfig::from_current_state(
+                                    grid,
+                                    &self.panels,
+                                    self.terminal_manager.as_ref(),
+                                    project_dir,
+                                    Some(&self.theme_registry.active().name),
+                                );
+                            crate::config::save_project_config(
+                                project_dir,
+                                &config,
+                            );
+                            info!("Saved project config on quit");
+                        }
+                        info!("Quit requested via shortcut -- exiting");
+                        event_loop.exit();
+                        return;
+                    }
                     self.process_action(action);
                 }
             }
