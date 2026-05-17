@@ -643,8 +643,8 @@ impl SettingsRenderer {
             _ => {}
         }
 
-        // Notification toast quads (render on top, bottom-right)
-        Self::build_toast_quads(state, viewport_y, viewport_h, width, theme, &mut quads);
+        // Notification toast rendering is handled by the shared ToastManager
+        // (see toast::renderer in app.rs build_quads/build_labels)
 
         quads
     }
@@ -908,42 +908,7 @@ impl SettingsRenderer {
         }
     }
 
-    /// Build notification toast quads (bottom-right).
-    fn build_toast_quads(
-        state: &SettingsState,
-        viewport_y: f32,
-        viewport_h: f32,
-        width: f32,
-        theme: &Theme,
-        quads: &mut Vec<QuadInstance>,
-    ) {
-        let max_toasts = 2;
-        let toast_x = width - TOAST_WIDTH - 16.0;
-        let toast_base_y = viewport_y + viewport_h - 16.0;
-
-        for (i, _toast) in state.toasts.iter().take(max_toasts).enumerate() {
-            let toast_h = 48.0;
-            let toast_y = toast_base_y - (i as f32 + 1.0) * (toast_h + 8.0);
-
-            // Toast background
-            quads.push(QuadInstance {
-                position: [toast_x, toast_y],
-                size: [TOAST_WIDTH, toast_h],
-                color: theme.bg_secondary,
-                corner_radius: 4.0,
-                _padding: 0.0,
-            });
-
-            // 2px accent left bar
-            quads.push(QuadInstance {
-                position: [toast_x, toast_y],
-                size: [2.0, toast_h],
-                color: theme.divider_hover,
-                corner_radius: 0.0,
-                _padding: 0.0,
-            });
-        }
-    }
+    // NOTE: build_toast_quads removed -- toast rendering delegated to shared toast::renderer
 
     /// Build text labels for the settings overlay.
     pub fn build_labels(
@@ -1071,16 +1036,8 @@ impl SettingsRenderer {
             }
         }
 
-        // Toast labels
-        Self::build_toast_labels(
-            state,
-            viewport_y,
-            viewport_h,
-            width,
-            fg_primary_color,
-            accent_color,
-            &mut labels,
-        );
+        // Toast labels are rendered by the shared ToastManager
+        // (see toast::renderer in app.rs build_labels)
 
         labels
     }
@@ -1450,47 +1407,7 @@ impl SettingsRenderer {
         }
     }
 
-    /// Build labels for notification toasts.
-    fn build_toast_labels(
-        state: &SettingsState,
-        viewport_y: f32,
-        viewport_h: f32,
-        width: f32,
-        fg_primary_color: glyphon::Color,
-        accent_color: glyphon::Color,
-        labels: &mut Vec<TextLabel>,
-    ) {
-        let max_toasts = 2;
-        let toast_x = width - TOAST_WIDTH - 16.0;
-        let toast_base_y = viewport_y + viewport_h - 16.0;
-
-        for (i, toast) in state.toasts.iter().take(max_toasts).enumerate() {
-            let toast_h = 48.0;
-            let toast_y = toast_base_y - (i as f32 + 1.0) * (toast_h + 8.0);
-
-            // Toast message
-            labels.push(TextLabel {
-                text: toast.message.clone(),
-                x: toast_x + 10.0,
-                y: toast_y + 8.0,
-                width: TOAST_WIDTH - 70.0,
-                height: 20.0,
-                font_size: 13.0,
-                color: fg_primary_color,
-            });
-
-            // "Undo" link (accent color, right-aligned)
-            labels.push(TextLabel {
-                text: "Undo".to_string(),
-                x: toast_x + TOAST_WIDTH - 50.0,
-                y: toast_y + 14.0,
-                width: 40.0,
-                height: 20.0,
-                font_size: 13.0,
-                color: accent_color,
-            });
-        }
-    }
+    // NOTE: build_toast_labels removed -- toast rendering delegated to shared toast::renderer
 
     /// Build shortcuts labels with actual binding data from the registry.
     ///
