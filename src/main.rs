@@ -9,6 +9,7 @@ mod markdown;
 mod platform;
 mod renderer;
 mod settings;
+mod shortcuts;
 mod sidebar;
 mod status_bar;
 mod terminal;

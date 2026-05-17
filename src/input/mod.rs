@@ -130,6 +130,32 @@ pub enum InputAction {
     CloseSettings,
 }
 
+/// Convert an action ID string (from the shortcut registry) to an InputAction.
+///
+/// Takes the focused panel_id as context for panel-specific actions.
+/// Returns None for unknown action IDs or actions handled at the app level (e.g., quit).
+pub fn action_from_id(action_id: &str, panel_id: PanelId) -> Option<InputAction> {
+    match action_id {
+        "panel_split_h" => Some(InputAction::PanelSplitHorizontal { panel_id }),
+        "panel_split_v" => Some(InputAction::PanelSplitVertical { panel_id }),
+        "panel_close" => Some(InputAction::PanelClose { panel_id }),
+        "create_terminal" => Some(InputAction::CreateTerminal),
+        "create_canvas" => Some(InputAction::CreateCanvas),
+        "toggle_sidebar" => Some(InputAction::ToggleSidebar),
+        "focus_next_panel" => Some(InputAction::FocusNextPanel),
+        "focus_prev_panel" => Some(InputAction::FocusPrevPanel),
+        "terminal_copy" => Some(InputAction::TerminalCopy { panel_id }),
+        "terminal_paste" => Some(InputAction::TerminalPaste { panel_id }),
+        "terminal_search" => Some(InputAction::TerminalSearchOpen { panel_id }),
+        "open_settings" => Some(InputAction::OpenSettings),
+        "font_size_up" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: 1.0 }),
+        "font_size_down" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: -1.0 }),
+        "toggle_fullscreen" => Some(InputAction::PanelToggleFullscreen { panel_id }),
+        "quit" => None, // Handled at app level via Cmd+Q
+        _ => None,
+    }
+}
+
 /// Cursor styles for different interaction states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorStyle {
