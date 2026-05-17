@@ -18,6 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Application Frame and Theming** - Navigation bars, status bars, settings, and theme system
 - [ ] **Phase 5: Configuration and Persistence** - Project config, global config, layout save/restore, keyboard shortcuts
 - [ ] **Phase 6: AI Monitoring and Ship** - Process monitoring, intervention toasts, and v1 distribution readiness
+- [ ] **Phase 7: Testing Infrastructure** - Headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, and criterion benchmarks
 
 ## Phase Details
 
@@ -152,10 +153,31 @@ Plans:
 - [x] 06-02-PLAN.md -- Freeze mechanics (SIGSTOP/SIGCONT, context menu, frozen overlay, input blocking)
 - [x] 06-03-PLAN.md -- Intervention detection (terminal pattern scanning, toast alerts, click-to-focus, session suppression)
 
+### Phase 7: Testing Infrastructure
+**Goal**: Project has automated regression detection beyond unit tests — headless GPU snapshot tests, real-PTY terminal integration tests, IPC contract tests, property-based fuzzing on parsers, and criterion benchmarks on hot paths
+**Mode:** mvp
+**Depends on**: Phase 6
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05
+**Success Criteria** (what must be TRUE):
+  1. Headless wgpu renders a known terminal state to a texture and compares against a golden image, catching visual regressions without a display
+  2. Integration tests spawn a real PTY via portable-pty, feed ANSI sequences, and assert against the alacritty_terminal grid state
+  3. IPC contract tests verify Rust↔webview message round-trips without launching a webview
+  4. Property-based tests (proptest) exercise markdown parser, config JSON deserializer, and keyboard shortcut parser with arbitrary input without panicking
+  5. Criterion benchmarks exist for text shaping, grid layout recomputation, and terminal grid update, with baseline thresholds that CI can gate on
+**Plans**: 3 plans
+
+Plans:
+**Wave 1**
+- [ ] 07-01-PLAN.md -- Library crate extraction, PTY integration tests, and IPC contract tests (lib.rs, dev-deps, TEST-02, TEST-03)
+
+**Wave 2** *(depends on Wave 1)*
+- [ ] 07-02-PLAN.md -- Headless GPU snapshot tests with golden image comparison (TEST-01)
+- [ ] 07-03-PLAN.md -- Property-based fuzzing (proptest) and criterion benchmarks (TEST-04, TEST-05)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 if resources allow.
 
 | Phase | Plans Complete | Status | Completed |
@@ -166,3 +188,4 @@ Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 
 | 4. Application Frame and Theming | 0/2 | Not started | - |
 | 5. Configuration and Persistence | 4/5 | Gap closure | - |
 | 6. AI Monitoring and Ship | 0/3 | Planning complete | - |
+| 7. Testing Infrastructure | 0/3 | Planning complete | - |
