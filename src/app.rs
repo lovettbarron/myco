@@ -37,7 +37,7 @@ use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_WIDTH};
 use crate::sidebar::renderer::SidebarRenderer;
 use crate::terminal::renderer::{TerminalRenderer, TerminalSnapshot};
 use crate::terminal::TerminalManager;
-use crate::theme::{Theme, linear_to_srgb_u8};
+use crate::theme::{Theme, ThemeRegistry, linear_to_srgb_u8};
 use crate::watcher::FileWatcher;
 use crate::window::create_window;
 
@@ -156,6 +156,7 @@ pub struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     theme: Theme,
+    theme_registry: ThemeRegistry,
     grid: Option<GridLayout>,
     panels: Vec<Panel>,
     mouse_state: MouseState,
@@ -210,6 +211,7 @@ impl App {
             window: None,
             renderer: None,
             theme: Theme::default(),
+            theme_registry: ThemeRegistry::new(),
             grid: None,
             panels: Vec::new(),
             mouse_state: MouseState::default(),
@@ -1154,6 +1156,24 @@ impl App {
                         let prev_id = panel_ids[prev_idx];
                         self.pending_actions.push(InputAction::FocusPanel { panel_id: prev_id });
                     }
+                }
+            }
+            InputAction::ThemeSwitch { theme_name } => {
+                if self.theme_registry.set_active(&theme_name) {
+                    let definition = self.theme_registry.active();
+                    // 1. Replace app theme
+                    self.theme = Theme::from_definition(definition);
+                    // 2. Replace terminal ANSI palette (per D-12)
+                    self.terminal_renderer.palette = definition.to_ansi_palette();
+                    // 3. Invalidate terminal buffer caches (colors changed, hashes stale)
+                    self.terminal_renderer.invalidate_all_caches();
+                    // 4. Request full redraw
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    info!("Theme switched to: {}", theme_name);
+                } else {
+                    warn!("Theme not found: {}", theme_name);
                 }
             }
             InputAction::InitPromptAccept => {

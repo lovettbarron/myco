@@ -122,6 +122,8 @@ pub enum InputAction {
     InitPromptAccept,
     /// User dismissed the project initialization prompt.
     InitPromptDismiss,
+    /// Switch the active theme by name.
+    ThemeSwitch { theme_name: String },
 }
 
 /// Cursor styles for different interaction states.
