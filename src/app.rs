@@ -215,6 +215,8 @@ pub struct App {
     bottom_bar: Option<BottomBar>,
     /// Settings overlay state (opened by Cmd+,, closed by Esc).
     settings: SettingsState,
+    /// Auto-save state for debounced config persistence (D-07, D-08).
+    auto_save: crate::config::AutoSaveState,
 }
 
 impl App {
@@ -255,6 +257,7 @@ impl App {
             stats_bar: StatsBar::new(),
             bottom_bar: None,
             settings: SettingsState::new(),
+            auto_save: crate::config::AutoSaveState::new(),
         }
     }
 }
@@ -313,6 +316,7 @@ impl App {
                         let panel = Panel::new_placeholder(new_id);
                         self.panels.push(panel);
                         self.recompute_layout();
+                        self.auto_save.mark_dirty();
                     }
                 }
             }
@@ -324,6 +328,7 @@ impl App {
                         let panel = Panel::new_placeholder(new_id);
                         self.panels.push(panel);
                         self.recompute_layout();
+                        self.auto_save.mark_dirty();
                     }
                 }
             }
@@ -350,6 +355,7 @@ impl App {
                                 grid.panel_nodes().first().map(|(_, id)| *id);
                         }
                         self.recompute_layout();
+                        self.auto_save.mark_dirty();
                     }
                 }
             }
@@ -694,6 +700,7 @@ impl App {
                                     }
                                 }
                             }
+                            self.auto_save.mark_dirty();
                         }
                     }
                 }
@@ -985,6 +992,7 @@ impl App {
                                     }
                                 }
                             }
+                            self.auto_save.mark_dirty();
                         }
                     }
                 }
@@ -2262,8 +2270,90 @@ impl ApplicationHandler<UserEvent> for App {
             cell_width, cell_height, self.terminal_renderer.font_size
         );
 
-        // Initialize grid with a single panel filling the window
-        let mut grid = GridLayout::new_single_panel();
+        // Create terminal manager with current directory as project dir (D-02)
+        let project_dir =
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        self.project_dir = Some(project_dir.clone());
+
+        // Load saved project config (CFG-04)
+        let project_config = crate::config::load_project_config(&project_dir);
+
+        // Apply saved theme or fall back to global preferences (D-01)
+        if let Some(ref config) = project_config {
+            if let Some(ref theme_name) = config.theme {
+                if self.theme_registry.set_active(theme_name) {
+                    self.theme = Theme::from_definition(self.theme_registry.active());
+                    info!("Restored project theme: {}", theme_name);
+                }
+            }
+        }
+        if project_config.as_ref().and_then(|c| c.theme.as_ref()).is_none() {
+            let global_prefs = crate::config::global::load_global_preferences();
+            if self.theme_registry.set_active(&global_prefs.default_theme) {
+                self.theme = Theme::from_definition(self.theme_registry.active());
+                info!("Applied global default theme: {}", global_prefs.default_theme);
+            }
+        }
+
+        // Initialize grid and panels from saved config or defaults
+        let (mut grid, panels_from_config) = if let Some(ref config) = project_config {
+            if crate::config::persistence::validate_config(config) {
+                let grid = GridLayout::from_config(&config.layout);
+                let mut panels = Vec::new();
+                let mut panel_id_counter: u64 = 0;
+
+                for col in &config.layout.columns {
+                    let caps = match col {
+                        crate::config::ColumnConfig::Single(cap) => vec![cap],
+                        crate::config::ColumnConfig::Stack { caps } => caps.iter().collect(),
+                    };
+                    for cap in caps {
+                        let pid = PanelId(panel_id_counter);
+                        panel_id_counter += 1;
+                        let panel = match cap.cap_type {
+                            crate::config::CapType::Terminal => Panel::new_terminal(pid),
+                            crate::config::CapType::Canvas => {
+                                let canvas_id = cap
+                                    .file
+                                    .as_ref()
+                                    .and_then(|f| {
+                                        std::path::Path::new(f)
+                                            .file_stem()
+                                            .map(|s| s.to_string_lossy().to_string())
+                                    })
+                                    .unwrap_or_else(|| format!("canvas-{}", panel_id_counter));
+                                Panel::new_canvas(pid, canvas_id)
+                            }
+                            crate::config::CapType::Markdown => {
+                                let file_path = cap
+                                    .file
+                                    .as_ref()
+                                    .map(|f| project_dir.join(f));
+                                if let Some(path) = file_path {
+                                    Panel::new_markdown(pid, path)
+                                } else {
+                                    Panel::new_terminal(pid)
+                                }
+                            }
+                        };
+                        panels.push(panel);
+                    }
+                }
+
+                if panels.is_empty() {
+                    (GridLayout::new_single_panel(), vec![Panel::new_terminal(PanelId(0))])
+                } else {
+                    info!("Restored {} panels from saved config", panels.len());
+                    (grid, panels)
+                }
+            } else {
+                warn!("Saved config failed validation, using default layout");
+                (GridLayout::new_single_panel(), vec![Panel::new_terminal(PanelId(0))])
+            }
+        } else {
+            (GridLayout::new_single_panel(), vec![Panel::new_terminal(PanelId(0))])
+        };
+
         let size = window.inner_size();
         if size.width > 0 && size.height > 0 {
             let w = size.width as f32 / self.scale_factor;
@@ -2273,15 +2363,8 @@ impl ApplicationHandler<UserEvent> for App {
             self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
         }
 
-        // Create the initial terminal panel (not placeholder)
-        let panel = Panel::new_terminal(PanelId(0));
-        self.panels = vec![panel];
-        self.focused_panel = Some(PanelId(0));
-
-        // Create terminal manager with current directory as project dir (D-02)
-        let project_dir =
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-        self.project_dir = Some(project_dir.clone());
+        self.panels = panels_from_config;
+        self.focused_panel = self.panels.first().map(|p| p.id);
 
         // Initialize bottom bar with project directory (D-07)
         self.bottom_bar = Some(BottomBar::new(project_dir.clone()));
@@ -2314,17 +2397,69 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
-        // Create terminal in the initial panel
-        let (_, _, pw, ph) = grid.get_panel_rect(grid.panel_nodes()[0].0);
-        let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cell_width).max(2.0) as usize;
-        let rows = ((ph - PANEL_TITLE_HEIGHT) / cell_height).max(1.0) as usize;
-        if let Err(e) = tm.create_terminal(PanelId(0), cols, rows) {
-            warn!("Failed to create initial terminal: {}", e);
-        } else {
-            // Update terminal state with computed cell dimensions
-            if let Some(ts) = tm.get_mut(&PanelId(0)) {
-                ts.cell_width = cell_width;
-                ts.cell_height = cell_height;
+        // Create terminals, canvases, and markdown viewers for restored panels
+        for panel in &self.panels {
+            match panel.panel_type {
+                PanelType::Terminal => {
+                    if let Some(node_id) = grid.find_node(panel.id) {
+                        let (_, _, pw, ph) = grid.get_panel_rect(node_id);
+                        let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cell_width).max(2.0) as usize;
+                        let rows = ((ph - PANEL_TITLE_HEIGHT) / cell_height).max(1.0) as usize;
+
+                        // Use saved CWD from config if available, otherwise project dir
+                        let terminal_cwd = project_config.as_ref().and_then(|config| {
+                            let mut idx = 0u64;
+                            for col in &config.layout.columns {
+                                let caps = match col {
+                                    crate::config::ColumnConfig::Single(cap) => vec![cap],
+                                    crate::config::ColumnConfig::Stack { caps } => caps.iter().collect(),
+                                };
+                                for cap in caps {
+                                    if PanelId(idx) == panel.id {
+                                        return cap.cwd.as_ref().map(|cwd| project_dir.join(cwd));
+                                    }
+                                    idx += 1;
+                                }
+                            }
+                            None
+                        });
+
+                        // Create terminal with saved or default CWD
+                        if let Some(cwd) = terminal_cwd {
+                            // We need a temporary terminal manager with different CWD
+                            let terminal = crate::terminal::TerminalState::new(
+                                cols, rows, &cwd,
+                            );
+                            match terminal {
+                                Ok(mut ts) => {
+                                    ts.cell_width = cell_width;
+                                    ts.cell_height = cell_height;
+                                    tm.terminals.insert(panel.id, ts);
+                                }
+                                Err(e) => warn!("Failed to create terminal with saved CWD: {}", e),
+                            }
+                        } else {
+                            if let Err(e) = tm.create_terminal(panel.id, cols, rows) {
+                                warn!("Failed to create terminal: {}", e);
+                            } else if let Some(ts) = tm.get_mut(&panel.id) {
+                                ts.cell_width = cell_width;
+                                ts.cell_height = cell_height;
+                            }
+                        }
+                    }
+                }
+                PanelType::Markdown => {
+                    if let Some(ref path) = panel.file_path {
+                        if let Some(mm) = &mut self.markdown_manager {
+                            if let Err(e) = mm.create_markdown(panel.id, path.clone()) {
+                                warn!("Failed to create markdown viewer: {}", e);
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Canvas and Placeholder panels are handled after window is stored
+                }
             }
         }
 
@@ -2364,6 +2499,18 @@ impl ApplicationHandler<UserEvent> for App {
         }
         match event {
             WindowEvent::CloseRequested => {
+                // Save config on exit (D-07: persist layout before closing)
+                if let (Some(grid), Some(project_dir)) = (&self.grid, &self.project_dir) {
+                    let config = crate::config::ProjectConfig::from_current_state(
+                        grid,
+                        &self.panels,
+                        self.terminal_manager.as_ref(),
+                        project_dir,
+                        Some(&self.theme_registry.active().name),
+                    );
+                    crate::config::save_project_config(project_dir, &config);
+                    info!("Saved project config on exit");
+                }
                 info!("Close requested -- exiting");
                 event_loop.exit();
             }
@@ -2974,6 +3121,21 @@ impl ApplicationHandler<UserEvent> for App {
         if needs_render {
             if let Some(window) = &self.window {
                 window.request_redraw();
+            }
+        }
+
+        // Auto-save config if dirty and debounce elapsed (D-07, D-08)
+        if self.auto_save.should_save() {
+            if let (Some(grid), Some(project_dir)) = (&self.grid, &self.project_dir) {
+                let config = crate::config::ProjectConfig::from_current_state(
+                    grid,
+                    &self.panels,
+                    self.terminal_manager.as_ref(),
+                    project_dir,
+                    Some(&self.theme_registry.active().name),
+                );
+                crate::config::save_project_config(project_dir, &config);
+                self.auto_save.mark_saved();
             }
         }
 
