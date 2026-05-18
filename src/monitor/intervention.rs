@@ -203,6 +203,21 @@ mod tests {
     }
 
     #[test]
+    fn test_pattern_match_claude_v2() {
+        let detector = InterventionDetector::new();
+
+        let permission_text = "╭─ Bash ─╮\n│ Allow once │ Allow always │ Deny │\n╰─────────╯";
+        let matches = detector.scan_text(permission_text);
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|(id, _)| id == "claude_code_permission"));
+
+        let selection_text = "? Which option?\n  1. Option A\n  2. Option B\nEnter to select · ↑/↓ to navigate · Esc to cancel";
+        let matches = detector.scan_text(selection_text);
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|(id, _)| id == "claude_code_permission"));
+    }
+
+    #[test]
     fn test_no_false_positive() {
         let detector = InterventionDetector::new();
         let text = "$ cargo build\n   Compiling myco v0.1.0\n    Finished dev [unoptimized] target\n$ ";

@@ -54,9 +54,14 @@ impl PatternConfig {
                     id: "claude_code_permission".to_string(),
                     tool_name: "Claude Code".to_string(),
                     matchers: vec![
+                        // v1.x formats
                         "Do you want to proceed?".to_string(),
                         "(y/n)".to_string(),
                         "Allow?".to_string(),
+                        // v2.x interactive TUI formats
+                        "Enter to select".to_string(),
+                        "Allow once".to_string(),
+                        "Allow always".to_string(),
                     ],
                     message_template: None,
                 },
@@ -162,9 +167,14 @@ mod tests {
             .find(|p| p.id == "claude_code_permission")
             .expect("should have claude_code_permission");
         assert_eq!(claude.tool_name, "Claude Code");
+        // v1.x matchers
         assert!(claude.matchers.contains(&"Do you want to proceed?".to_string()));
         assert!(claude.matchers.contains(&"(y/n)".to_string()));
         assert!(claude.matchers.contains(&"Allow?".to_string()));
+        // v2.x matchers
+        assert!(claude.matchers.contains(&"Enter to select".to_string()));
+        assert!(claude.matchers.contains(&"Allow once".to_string()));
+        assert!(claude.matchers.contains(&"Allow always".to_string()));
 
         let sudo = config
             .patterns
