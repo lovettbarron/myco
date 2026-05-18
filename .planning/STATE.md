@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: ~
-last_updated: "2026-05-18T20:00:00.000Z"
-last_activity: 2026-05-18 -- Phases 08+09 executed, TLDraw→Excalidraw migration (uncommitted)
+status: completed
+stopped_at: Phase 10 context gathered
+last_updated: "2026-05-18T18:46:59.427Z"
+last_activity: 2026-05-18 -- Phases 08+09 executed, TLDraw→Excalidraw migration
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 8
-  total_plans: 29
-  completed_plans: 28
-  percent: 97
+  total_plans: 26
+  completed_plans: 29
+  percent: 100
 ---
 
 # Project State
@@ -111,6 +111,12 @@ Recent decisions affecting current work:
 
 None yet.
 
+### Backlog
+
+| # | Item | Priority | Context |
+|---|------|----------|---------|
+| B-01 | **Terminal input line: native text navigation** — Option+Arrow (word jump), Cmd+Arrow (line jump), Option+Backspace (delete word) currently pass raw escape sequences to PTY instead of performing natural cursor movement. Implement a Warp-style input interception layer that detects when the cursor is on the shell prompt line and translates macOS text navigation keys to appropriate readline/zle sequences (`\eb`/`\ef` for word movement, `\x01`/`\x05` for line start/end). Requires prompt detection, shell-aware keybinding translation (bash readline vs zsh zle), and a toggle to fall back to raw mode for full-screen TUI apps. | HIGH | Screenshot: `;3CD` literal appearing when pressing Option+Left. Warp reference: separates input editor from terminal grid. |
+
 ### Quick Tasks Completed
 
 | # | Description | Date | Commit | Directory |
@@ -135,7 +141,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-18T20:00:00.000Z
-Stopped at: ~
-Resume file: None
+Last session: 2026-05-18T18:46:59.421Z
+Stopped at: Phase 10 context gathered
+Resume file: .planning/phases/10-agentic-heartbeat-cap/10-CONTEXT.md
 Pending: Commit Excalidraw migration, then execute Phase 03-03 or close milestone
