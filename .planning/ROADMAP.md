@@ -187,12 +187,18 @@ Plans:
   3. Divider drag resizing enforces minimum panel sizes on both sides of the divider
   4. Closing a panel collapses unnecessary container nodes (single-child containers unwrap automatically)
   5. The public grid API (`split_panel`, `close_panel`, `get_panel_rect`, `swap_panels`, `toggle_fullscreen`) is preserved so other phases are unaffected
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 09-01-PLAN.md -- Split tree data structure (replace CSS Grid model with recursive N-ary tree backed by taffy Flexbox nodes, PaneFlex weights, SplitDirection per branch)
-- [ ] 09-02-PLAN.md -- Split/close operations with flattening (same-axis sibling insertion, cross-axis nesting, container collapse on close, minimum size rejection)
-- [ ] 09-03-PLAN.md -- Divider drag constraints and smart split (minimum size enforcement during drag, optional auto-pick split direction by aspect ratio)
+
+**Wave 1**
+- [ ] 09-01-PLAN.md -- SplitNode tree data structure and Flexbox engine (replace CSS Grid with recursive N-ary tree, walk-to-root fix)
+
+**Wave 2** *(depends on Wave 1)*
+- [ ] 09-02-PLAN.md -- N-ary tree operations and config migration (same-axis flattening, cross-axis nesting, container collapse, min size rejection, v1->v2 config migration)
+
+**Wave 3** *(depends on Waves 1+2)*
+- [ ] 09-03-PLAN.md -- Tree-walk dividers and app integration (nested divider computation, container-local drag, constrained warning, split toast, config loading update)
 
 ### Phase 8: Agent Monitor Cap
 **Goal**: User can open a dedicated panel that displays all running AI agent sessions with real-time status, resource usage, token spend, and intervention history — promoting the toast-based monitoring from Phase 6 into a full first-class cap
@@ -204,7 +210,7 @@ Plans:
   2. Each agent entry shows real-time CPU/RAM, running time, and accumulated token usage (where detectable from terminal output)
   3. User can click an agent entry to focus the terminal panel running that agent, or freeze/unfreeze it directly from the monitor
   4. Agent monitor shows intervention history (past alerts with timestamps) and current intervention state per agent
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
 - [ ] 08-01-PLAN.md -- Agent discovery and data model (detect AI processes, AgentSession struct, background polling)
