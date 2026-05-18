@@ -76,6 +76,9 @@ pub enum CapType {
     Canvas,
     /// Markdown viewer/editor cap.
     Markdown,
+    /// Agent monitor cap.
+    #[serde(rename = "agent_monitor")]
+    AgentMonitor,
 }
 
 impl ProjectConfig {
@@ -203,6 +206,11 @@ impl ProjectConfig {
                     cwd: None,
                 }
             }
+            PanelType::AgentMonitor => CapConfig {
+                cap_type: CapType::AgentMonitor,
+                file: None,
+                cwd: None,
+            },
             PanelType::Placeholder => CapConfig {
                 cap_type: CapType::Terminal,
                 file: None,

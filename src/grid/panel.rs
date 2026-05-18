@@ -15,6 +15,8 @@ pub enum PanelType {
     Canvas,
     /// Markdown panel -- GPU-rendered markdown viewer.
     Markdown,
+    /// Agent monitor panel -- GPU-rendered list of AI agent sessions.
+    AgentMonitor,
 }
 
 impl std::fmt::Display for PanelType {
@@ -24,6 +26,7 @@ impl std::fmt::Display for PanelType {
             PanelType::Terminal => write!(f, "Terminal"),
             PanelType::Canvas => write!(f, "Canvas"),
             PanelType::Markdown => write!(f, "Markdown"),
+            PanelType::AgentMonitor => write!(f, "Agent Monitor"),
         }
     }
 }
@@ -83,6 +86,19 @@ impl Panel {
             title,
             file_path: None,
             canvas_id: Some(canvas_id),
+            frozen: false,
+            child_pid: None,
+        }
+    }
+
+    /// Create a new agent monitor panel with the given ID.
+    pub fn new_agent_monitor(id: PanelId) -> Self {
+        Self {
+            id,
+            panel_type: PanelType::AgentMonitor,
+            title: "Agent Monitor".into(),
+            file_path: None,
+            canvas_id: None,
             frozen: false,
             child_pid: None,
         }

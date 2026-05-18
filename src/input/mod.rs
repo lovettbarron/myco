@@ -94,6 +94,8 @@ pub enum InputAction {
     MarkdownScroll { panel_id: PanelId, delta: f32 },
     /// Zoom canvas panel (scroll wheel → zoom in/out).
     CanvasZoom { panel_id: PanelId, delta: f32 },
+    /// Scroll agent monitor panel (agent list or alert log depending on cursor position).
+    AgentMonitorScroll { panel_id: PanelId, delta: f32, cursor_y: f32 },
     /// Markdown file changed on disk (from watcher).
     MarkdownFileChanged { path: PathBuf },
     /// Toggle sidebar visibility.
