@@ -1,4 +1,5 @@
 use std::time::Instant;
+use taffy::NodeId;
 use winit::event::MouseButton;
 use winit::keyboard::ModifiersState;
 
@@ -31,6 +32,8 @@ pub enum DragState {
     DraggingDivider {
         divider_index: usize,
         orientation: Orientation,
+        container_node: NodeId,
+        child_index: usize,
         start_pos: f64,
         last_pos: f64,
     },
@@ -208,9 +211,12 @@ impl MouseState {
                         Orientation::Vertical => x,
                         Orientation::Horizontal => y,
                     };
+                    let div = &dividers.dividers[idx];
                     self.drag = DragState::DraggingDivider {
                         divider_index: idx,
                         orientation,
+                        container_node: div.container_node,
+                        child_index: div.child_index,
                         start_pos: start,
                         last_pos: start,
                     };
@@ -428,13 +434,18 @@ impl MouseState {
     }
 
     /// Get the current divider drag info (if dragging a divider).
-    pub fn divider_drag_info(&self) -> Option<(usize, Orientation)> {
+    ///
+    /// Returns (divider_index, orientation, container_node, child_index) for
+    /// routing the drag to the correct container in the split tree.
+    pub fn divider_drag_info(&self) -> Option<(usize, Orientation, NodeId, usize)> {
         match &self.drag {
             DragState::DraggingDivider {
                 divider_index,
                 orientation,
+                container_node,
+                child_index,
                 ..
-            } => Some((*divider_index, *orientation)),
+            } => Some((*divider_index, *orientation, *container_node, *child_index)),
             _ => None,
         }
     }

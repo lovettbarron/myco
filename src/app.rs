@@ -10,7 +10,7 @@ use winit::window::{CursorIcon, Window, WindowId};
 
 use alacritty_terminal::grid::Dimensions as TermDimTrait;
 use crate::grid::divider::{
-    self, compute_dividers, DividerSet, Orientation, DIVIDER_VISUAL_WIDTH,
+    self, compute_dividers, DividerSet, Orientation, DIVIDER_ACTIVE_WIDTH, DIVIDER_VISUAL_WIDTH,
 };
 use crate::grid::layout::GridLayout;
 use crate::grid::operations::{self, SplitDirection};
@@ -391,28 +391,22 @@ impl App {
 
         match action {
             InputAction::DividerDragMove { delta_pixels } => {
-                if let (Some(grid), Some((div_idx, orientation))) = (
+                if let (Some(grid), Some((div_idx, _orientation, _container_node, _child_index))) = (
                     self.grid.as_mut(),
                     self.mouse_state.divider_drag_info(),
                 ) {
-                    let window = self.window.as_ref();
-                    let total_size = match (orientation, window) {
-                        (Orientation::Vertical, Some(w)) => {
-                            w.inner_size().width as f32 / self.scale_factor
+                    if let Some(div) = self.dividers.dividers.get(div_idx) {
+                        let div_clone = div.clone();
+                        let constrained = divider::apply_divider_drag(
+                            grid,
+                            &div_clone,
+                            delta_pixels,
+                        );
+                        // Update the constrained state on the stored divider
+                        if let Some(stored_div) = self.dividers.dividers.get_mut(div_idx) {
+                            stored_div.constrained = constrained;
                         }
-                        (Orientation::Horizontal, Some(w)) => {
-                            w.inner_size().height as f32 / self.scale_factor
-                                - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT
-                        }
-                        _ => return,
-                    };
-                    divider::apply_divider_drag(
-                        grid,
-                        orientation,
-                        div_idx,
-                        delta_pixels,
-                        total_size,
-                    );
+                    }
                     self.recompute_layout();
                 }
             }
@@ -431,6 +425,20 @@ impl App {
                         self.panels.push(panel);
                         self.recompute_layout();
                         self.auto_save.mark_dirty();
+                    } else if grid.panel_count() >= 20 {
+                        self.toast_manager.add(
+                            crate::toast::ToastType::Info,
+                            "Cannot split: maximum of 20 panels reached".to_string(),
+                            None, None, Some("split_rejected".into()), None,
+                            std::time::Duration::from_secs(3),
+                        );
+                    } else {
+                        self.toast_manager.add(
+                            crate::toast::ToastType::Info,
+                            "Cannot split: panel below minimum size (200\u{00d7}150px)".to_string(),
+                            None, None, Some("split_rejected".into()), None,
+                            std::time::Duration::from_secs(3),
+                        );
                     }
                 }
             }
@@ -443,6 +451,20 @@ impl App {
                         self.panels.push(panel);
                         self.recompute_layout();
                         self.auto_save.mark_dirty();
+                    } else if grid.panel_count() >= 20 {
+                        self.toast_manager.add(
+                            crate::toast::ToastType::Info,
+                            "Cannot split: maximum of 20 panels reached".to_string(),
+                            None, None, Some("split_rejected".into()), None,
+                            std::time::Duration::from_secs(3),
+                        );
+                    } else {
+                        self.toast_manager.add(
+                            crate::toast::ToastType::Info,
+                            "Cannot split: panel below minimum size (200\u{00d7}150px)".to_string(),
+                            None, None, Some("split_rejected".into()), None,
+                            std::time::Duration::from_secs(3),
+                        );
                     }
                 }
             }
@@ -1982,7 +2004,7 @@ impl App {
 
         let (mut grid, panels_from_config) = if let Some(ref config) = project_config {
             if crate::config::persistence::validate_config(config) {
-                let grid = GridLayout::from_config(&config.layout);
+                let grid = GridLayout::from_project_config(config);
                 let mut panels = Vec::new();
                 let mut panel_id_counter: u64 = 0;
 
@@ -2049,7 +2071,7 @@ impl App {
                 let h = size.height as f32 / self.scale_factor;
                 let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
                 grid.compute(w, grid_height.max(1.0));
-                self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
+                self.dividers = compute_dividers(&grid);
             }
         }
 
@@ -2211,7 +2233,7 @@ impl App {
                 let grid_width = w - sidebar_w;
 
                 grid.compute(grid_width, grid_height.max(1.0));
-                self.dividers = compute_dividers(grid, grid_width, grid_height.max(1.0));
+                self.dividers = compute_dividers(grid);
             }
         }
 
@@ -2812,36 +2834,54 @@ impl App {
         }
 
         // Divider quads (offset by sidebar width)
+        // Determine if we are currently dragging a divider for active width
+        let dragging_divider_idx = self.mouse_state.divider_drag_info().map(|(idx, _, _, _)| idx);
+
         for (i, div) in self.dividers.dividers.iter().enumerate() {
             let is_hovered = self.mouse_state.hovered_divider == Some(i);
-            let color = if is_hovered {
+            let is_dragging = dragging_divider_idx == Some(i);
+
+            // Color: constrained (warning) > hover/drag (accent) > rest
+            let color = if div.constrained {
+                self.theme.warning
+            } else if is_hovered || is_dragging {
                 self.theme.divider_hover
             } else {
                 self.theme.divider
             };
 
+            // Width: active (4px) when dragging, visual (1px) otherwise
+            let divider_width = if is_dragging {
+                DIVIDER_ACTIVE_WIDTH
+            } else {
+                DIVIDER_VISUAL_WIDTH
+            };
+
             match div.orientation {
                 Orientation::Vertical => {
-                    let grid_height = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+                    // Use extent bounds for nested dividers instead of full grid height
+                    let extent_height = div.extent_end - div.extent_start;
                     quads.push(QuadInstance {
                         position: [
-                            div.position - DIVIDER_VISUAL_WIDTH / 2.0 + sidebar_offset,
-                            TOP_CHROME_HEIGHT,
+                            div.position - divider_width / 2.0 + sidebar_offset,
+                            div.extent_start + TOP_CHROME_HEIGHT,
                         ],
-                        size: [DIVIDER_VISUAL_WIDTH, grid_height],
+                        size: [divider_width, extent_height],
                         color,
                         corner_radius: 0.0,
                         _padding: 0.0,
                     });
                 }
                 Orientation::Horizontal => {
+                    // Use extent bounds for nested dividers instead of full grid width
+                    let extent_width = div.extent_end - div.extent_start;
                     quads.push(QuadInstance {
                         position: [
-                            sidebar_offset,
+                            div.extent_start + sidebar_offset,
                             div.position + TOP_CHROME_HEIGHT
-                                - DIVIDER_VISUAL_WIDTH / 2.0,
+                                - divider_width / 2.0,
                         ],
-                        size: [width - sidebar_offset, DIVIDER_VISUAL_WIDTH],
+                        size: [extent_width, divider_width],
                         color,
                         corner_radius: 0.0,
                         _padding: 0.0,
@@ -3548,7 +3588,7 @@ impl ApplicationHandler<UserEvent> for App {
         // Initialize grid and panels from saved config or defaults
         let (mut grid, panels_from_config) = if let Some(ref config) = project_config {
             if crate::config::persistence::validate_config(config) {
-                let grid = GridLayout::from_config(&config.layout);
+                let grid = GridLayout::from_project_config(config);
                 let mut panels = Vec::new();
                 let mut panel_id_counter: u64 = 0;
 
@@ -3613,7 +3653,7 @@ impl ApplicationHandler<UserEvent> for App {
             let h = size.height as f32 / self.scale_factor;
             let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
             grid.compute(w, grid_height.max(1.0));
-            self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
+            self.dividers = compute_dividers(&grid);
         }
 
         self.panels = panels_from_config;
