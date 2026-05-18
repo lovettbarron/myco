@@ -126,6 +126,7 @@ None yet.
 | 260518-sip | Update intervention detection patterns for Claude Code v2.x | 2026-05-18 | fef31bc | [20260518-stale-intervention-patterns](./quick/20260518-stale-intervention-patterns/) |
 | 260518-acs | Add Cap submenu to File menu with all panel types | 2026-05-18 | 0774c49 | [20260518-add-cap-submenu](./quick/20260518-add-cap-submenu/) |
 | 260518-t0k | Improve sidebar file browser: fix emoji chevrons, file-type color coding, hide .DS_Store | 2026-05-18 | f5afd46 | [260518-t0k-improve-sidebar-file-browser-to-match-wa](./quick/260518-t0k-improve-sidebar-file-browser-to-match-wa/) |
+| 260518-t5g | Add project-wide file search to sidebar (Cmd+Shift+F) with grouped results | 2026-05-18 | 5c29a06 | [260518-t5g-add-project-wide-file-search-to-sidebar-](./quick/260518-t5g-add-project-wide-file-search-to-sidebar-/) |
 
 ### Blockers/Concerns
 
