@@ -131,6 +131,11 @@ impl SidebarState {
                 continue;
             }
 
+            // Hide .DS_Store (macOS metadata noise)
+            if name == ".DS_Store" {
+                continue;
+            }
+
             // T-03-11: Skip symlinks that resolve outside project_dir
             if is_dir {
                 if let Ok(canonical) = path.canonicalize() {
