@@ -68,6 +68,281 @@ fn branch_container_style(direction: FlexDirection) -> Style {
     }
 }
 
+/// Result of removing a panel from the split tree.
+enum RemoveResult {
+    /// Panel was not found in this subtree.
+    NotFound,
+    /// Panel was removed, tree updated in place.
+    Removed,
+    /// This node was the target leaf -- remove it from the parent.
+    RemovedSelf,
+    /// Container collapsed to a single child. Caller should replace this node
+    /// with the returned survivor.
+    Collapse(SplitNode),
+}
+
+/// Core recursive split algorithm per RESEARCH.md Example 1.
+///
+/// Same-axis splits flatten as siblings (D-02).
+/// Cross-axis splits create nested containers.
+fn split_in_tree(
+    tree: &mut SplitNode,
+    target_panel_id: PanelId,
+    direction: SplitDirection,
+    new_panel_id: PanelId,
+    taffy: &mut TaffyTree<()>,
+    root: NodeId,
+) -> bool {
+    match tree {
+        SplitNode::Leaf { panel_id, taffy_node } if *panel_id == target_panel_id => {
+            // Found the target leaf. Replace it with a branch containing old + new.
+            let old_leaf_taffy = *taffy_node;
+            let new_leaf_taffy = taffy.new_leaf(leaf_panel_style()).unwrap();
+
+            let old_leaf = SplitNode::Leaf {
+                panel_id: *panel_id,
+                taffy_node: old_leaf_taffy,
+            };
+            let new_leaf = SplitNode::Leaf {
+                panel_id: new_panel_id,
+                taffy_node: new_leaf_taffy,
+            };
+
+            let flex_dir = match direction {
+                SplitDirection::Horizontal => FlexDirection::Row,
+                SplitDirection::Vertical => FlexDirection::Column,
+            };
+            let branch_taffy = taffy.new_with_children(
+                branch_container_style(flex_dir),
+                &[old_leaf_taffy, new_leaf_taffy],
+            ).unwrap();
+
+            *tree = SplitNode::Branch {
+                direction,
+                children: vec![old_leaf, new_leaf],
+                weights: vec![0.5, 0.5],
+                taffy_node: branch_taffy,
+            };
+            true
+        }
+        SplitNode::Branch { direction: branch_dir, children, weights, taffy_node } => {
+            // Find child containing the target
+            for (i, child) in children.iter_mut().enumerate() {
+                if child.contains_panel(target_panel_id) {
+                    if *branch_dir == direction && child.is_leaf() {
+                        // SAME AXIS + DIRECT CHILD LEAF: flatten as sibling
+                        let new_leaf_taffy = taffy.new_leaf(leaf_panel_style()).unwrap();
+                        let new_leaf = SplitNode::Leaf {
+                            panel_id: new_panel_id,
+                            taffy_node: new_leaf_taffy,
+                        };
+                        // Insert after the target
+                        children.insert(i + 1, new_leaf);
+                        taffy.insert_child_at_index(*taffy_node, i + 1, new_leaf_taffy).unwrap();
+                        // Redistribute weights equally
+                        let n = children.len() as f32;
+                        *weights = vec![1.0 / n; children.len()];
+                        // Update taffy styles for all children to match new weights
+                        for (j, ch) in children.iter().enumerate() {
+                            let w = weights[j];
+                            match ch {
+                                SplitNode::Leaf { taffy_node: tn, .. } => {
+                                    let mut style = taffy.style(*tn).unwrap().clone();
+                                    style.flex_grow = w;
+                                    taffy.set_style(*tn, style).unwrap();
+                                }
+                                SplitNode::Branch { taffy_node: tn, .. } => {
+                                    let mut style = taffy.style(*tn).unwrap().clone();
+                                    style.flex_grow = w;
+                                    taffy.set_style(*tn, style).unwrap();
+                                }
+                            }
+                        }
+                        return true;
+                    } else {
+                        // Recurse into child (cross-axis or nested target)
+                        return split_in_tree(child, target_panel_id, direction, new_panel_id, taffy, root);
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Core recursive remove algorithm per RESEARCH.md Example 2.
+///
+/// Implements container collapse (D-03): when removing leaves a single child,
+/// that child gets promoted upward.
+fn remove_from_tree(
+    tree: &mut SplitNode,
+    target: PanelId,
+    taffy: &mut TaffyTree<()>,
+) -> RemoveResult {
+    match tree {
+        SplitNode::Leaf { panel_id, .. } => {
+            if *panel_id == target {
+                // Signal to parent: remove me from your children list
+                RemoveResult::RemovedSelf
+            } else {
+                RemoveResult::NotFound
+            }
+        }
+        SplitNode::Branch { children, weights, taffy_node, .. } => {
+            let mut action = None;
+
+            for (i, child) in children.iter_mut().enumerate() {
+                match remove_from_tree(child, target, taffy) {
+                    RemoveResult::Removed => return RemoveResult::Removed,
+                    RemoveResult::RemovedSelf => {
+                        // Child is the target leaf -- remove it from our children
+                        action = Some((i, None));
+                        break;
+                    }
+                    RemoveResult::Collapse(survivor) => {
+                        // A sub-container collapsed -- replace the child with the survivor
+                        action = Some((i, Some(survivor)));
+                        break;
+                    }
+                    RemoveResult::NotFound => continue,
+                }
+            }
+
+            if let Some((idx, replacement)) = action {
+                match replacement {
+                    None => {
+                        // Direct child leaf was the target -- remove it
+                        children.remove(idx);
+                        weights.remove(idx);
+                    }
+                    Some(survivor) => {
+                        // Sub-container collapsed -- replace child at idx with survivor
+                        children[idx] = survivor;
+                        // Weight stays the same (the survivor takes the collapsed container's position)
+                    }
+                }
+
+                if children.len() == 1 {
+                    // D-03: Single child remaining -> collapse this container
+                    let survivor = children.remove(0);
+                    return RemoveResult::Collapse(survivor);
+                }
+
+                if children.is_empty() {
+                    // Edge case: should not happen with valid tree, but handle gracefully
+                    return RemoveResult::RemovedSelf;
+                }
+
+                // Normalize weights
+                let sum: f32 = weights.iter().sum();
+                if sum > 0.0 {
+                    for w in weights.iter_mut() {
+                        *w /= sum;
+                    }
+                }
+                // Rebuild taffy children
+                let child_nodes: Vec<NodeId> = children.iter().map(|c| c.taffy_node_id()).collect();
+                let _ = taffy.set_children(*taffy_node, &child_nodes);
+                RemoveResult::Removed
+            } else {
+                RemoveResult::NotFound
+            }
+        }
+    }
+}
+
+/// Rebuild taffy nodes from a saved SplitNode tree.
+/// Creates fresh taffy nodes that mirror the tree structure.
+fn rebuild_taffy_from_split_node(
+    node: &SplitNode,
+    taffy: &mut TaffyTree<()>,
+) -> SplitNode {
+    match node {
+        SplitNode::Leaf { panel_id, .. } => {
+            let new_taffy = taffy.new_leaf(leaf_panel_style()).unwrap();
+            SplitNode::Leaf {
+                panel_id: *panel_id,
+                taffy_node: new_taffy,
+            }
+        }
+        SplitNode::Branch { direction, children, weights, .. } => {
+            let rebuilt_children: Vec<SplitNode> = children
+                .iter()
+                .map(|child| rebuild_taffy_from_split_node(child, taffy))
+                .collect();
+            let child_taffy_nodes: Vec<NodeId> = rebuilt_children
+                .iter()
+                .map(|c| c.taffy_node_id())
+                .collect();
+
+            let flex_dir = match direction {
+                SplitDirection::Horizontal => FlexDirection::Row,
+                SplitDirection::Vertical => FlexDirection::Column,
+            };
+            let branch_taffy = taffy.new_with_children(
+                branch_container_style(flex_dir),
+                &child_taffy_nodes,
+            ).unwrap();
+
+            // Set weights on children
+            for (i, child) in rebuilt_children.iter().enumerate() {
+                if let Some(&w) = weights.get(i) {
+                    let tn = child.taffy_node_id();
+                    if let Ok(style) = taffy.style(tn) {
+                        let mut style = style.clone();
+                        style.flex_grow = w;
+                        taffy.set_style(tn, style).unwrap();
+                    }
+                }
+            }
+
+            SplitNode::Branch {
+                direction: *direction,
+                children: rebuilt_children,
+                weights: weights.clone(),
+                taffy_node: branch_taffy,
+            }
+        }
+    }
+}
+
+/// Recursively sync taffy tree children to match the SplitNode tree structure.
+/// For each Branch, ensures the taffy node has the correct children attached.
+fn sync_taffy_children_recursive(node: &SplitNode, taffy: &mut TaffyTree<()>) {
+    if let SplitNode::Branch { children, taffy_node, .. } = node {
+        // First recurse into children
+        for child in children {
+            sync_taffy_children_recursive(child, taffy);
+        }
+
+        // Set this branch's children in taffy
+        let child_taffy_nodes: Vec<NodeId> = children
+            .iter()
+            .map(|c| c.taffy_node_id())
+            .collect();
+        let _ = taffy.set_children(*taffy_node, &child_taffy_nodes);
+    }
+}
+
+/// Swap panel IDs within the split tree.
+fn swap_panel_ids_in_tree(tree: &mut SplitNode, panel_a: PanelId, panel_b: PanelId) {
+    match tree {
+        SplitNode::Leaf { panel_id, .. } => {
+            if *panel_id == panel_a {
+                *panel_id = panel_b;
+            } else if *panel_id == panel_b {
+                *panel_id = panel_a;
+            }
+        }
+        SplitNode::Branch { children, .. } => {
+            for child in children {
+                swap_panel_ids_in_tree(child, panel_a, panel_b);
+            }
+        }
+    }
+}
+
 impl GridLayout {
     /// Create a new grid layout with a single panel filling the entire space.
     ///
@@ -368,6 +643,113 @@ impl GridLayout {
     /// Call after any tree mutation to keep panels in sync.
     pub fn sync_panels_from_tree(&mut self) {
         self.panels = self.split_tree.collect_leaves();
+    }
+
+    /// Perform a split operation on the tree, creating a new panel adjacent to target.
+    ///
+    /// Handles same-axis flattening (D-02) and cross-axis nesting.
+    /// Returns true if the split was performed.
+    pub fn perform_split(
+        &mut self,
+        target: PanelId,
+        direction: SplitDirection,
+        new_panel_id: PanelId,
+    ) -> bool {
+        let success = split_in_tree(
+            &mut self.split_tree,
+            target,
+            direction,
+            new_panel_id,
+            &mut self.tree,
+            self.root,
+        );
+        if success {
+            self.sync_taffy_from_split_tree();
+            self.sync_panels_from_tree();
+        }
+        success
+    }
+
+    /// Perform a remove operation, closing a panel and collapsing containers (D-03).
+    /// Returns true if the panel was removed.
+    pub fn perform_remove(&mut self, target: PanelId) -> bool {
+        let result = remove_from_tree(&mut self.split_tree, target, &mut self.tree);
+        match result {
+            RemoveResult::Removed => {
+                self.sync_taffy_from_split_tree();
+                self.sync_panels_from_tree();
+                true
+            }
+            RemoveResult::Collapse(survivor) => {
+                // Root collapsed to a single node -- replace split_tree
+                self.split_tree = survivor;
+                self.sync_taffy_from_split_tree();
+                self.sync_panels_from_tree();
+                true
+            }
+            RemoveResult::RemovedSelf => {
+                // The root itself was the target (shouldn't happen in practice
+                // since we check panel_count > 1 before calling)
+                // But handle gracefully
+                self.sync_taffy_from_split_tree();
+                self.sync_panels_from_tree();
+                true
+            }
+            RemoveResult::NotFound => false,
+        }
+    }
+
+    /// Sync the taffy tree structure from the split_tree model.
+    /// Recursively rebuilds the entire taffy child hierarchy to match the split tree.
+    fn sync_taffy_from_split_tree(&mut self) {
+        // Recursively sync all branch nodes in the split tree
+        sync_taffy_children_recursive(&self.split_tree, &mut self.tree);
+
+        // Clear root's current children and attach split_tree top node
+        let current_children = self.tree.children(self.root).unwrap_or_default();
+        for child in current_children {
+            let _ = self.tree.remove_child(self.root, child);
+        }
+
+        match &self.split_tree {
+            SplitNode::Leaf { taffy_node, .. } => {
+                self.tree.add_child(self.root, *taffy_node).unwrap();
+            }
+            SplitNode::Branch { taffy_node, .. } => {
+                self.tree.add_child(self.root, *taffy_node).unwrap();
+            }
+        }
+
+        // Update root style's grid_template values for divider.rs compatibility.
+        // Map the split tree's top-level structure to equivalent column/row counts.
+        let (col_count, row_count) = match &self.split_tree {
+            SplitNode::Leaf { .. } => (1, 1),
+            SplitNode::Branch { children, direction, .. } => {
+                match direction {
+                    SplitDirection::Horizontal => (children.len(), 1),
+                    SplitDirection::Vertical => (1, children.len()),
+                }
+            }
+        };
+        let mut root_style = self.tree.style(self.root).unwrap().clone();
+        root_style.grid_template_columns = (0..col_count).map(|_| fr(1.0)).collect();
+        root_style.grid_template_rows = (0..row_count).map(|_| fr(1.0)).collect();
+        self.tree.set_style(self.root, root_style).unwrap();
+    }
+
+    /// Rebuild the full taffy tree structure from a saved SplitNode.
+    /// Used for fullscreen restore.
+    pub fn rebuild_from_split_tree(&mut self, saved_tree: SplitNode) {
+        // Recursively create taffy nodes from the saved tree
+        let rebuilt = rebuild_taffy_from_split_node(&saved_tree, &mut self.tree);
+        self.split_tree = rebuilt;
+        self.sync_taffy_from_split_tree();
+        self.sync_panels_from_tree();
+    }
+
+    /// Swap panel IDs in the split tree (used by swap_panels).
+    pub fn swap_in_split_tree(&mut self, panel_a: PanelId, panel_b: PanelId) {
+        swap_panel_ids_in_tree(&mut self.split_tree, panel_a, panel_b);
     }
 
     /// Create a grid layout from a saved configuration.
