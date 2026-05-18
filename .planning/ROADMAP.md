@@ -20,6 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 6: AI Monitoring and Ship** - Process monitoring, intervention toasts, and v1 distribution readiness
 - [x] **Phase 7: Testing Infrastructure** - Headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, and criterion benchmarks (completed 2026-05-17)
 - [ ] **Phase 8: Agent Monitor Cap** - Dedicated GPU-rendered panel showing running AI agent sessions with status, token usage, running time, and intervention history
+- [ ] **Phase 10: Agentic Heartbeat Cap** - Periodic LLM-driven project health monitoring via Ollama/API — ambient intelligence that runs heartbeat jobs against the codebase and surfaces findings
 - [ ] **Phase 9: Grid Layout Refactor** - Replace CSS Grid 2-level model with Warp-style recursive N-ary split tree using taffy Flexbox, with minimum panel sizes and smart split direction
 
 ## Phase Details
@@ -217,12 +218,42 @@ Plans:
 - [x] 08-02-PLAN.md -- GPU-rendered monitor panel (new PanelType::AgentMonitor, list rendering, status indicators)
 - [x] 08-03-PLAN.md -- Interactions and token tracking (click-to-focus, freeze controls, terminal output token parsing, intervention history)
 
+### Phase 10: Agentic Heartbeat Cap
+**Goal**: User can define periodic LLM-driven health checks that run against the project codebase via Ollama (or remote API), surfacing findings as ambient project intelligence in a dedicated cap — like having a colleague keeping an eye on things
+**Mode:** mvp
+**Depends on**: Phase 6 (monitoring infrastructure), Phase 8 (agent patterns)
+**Requirements**: HEARTBEAT-01, HEARTBEAT-02, HEARTBEAT-03, HEARTBEAT-04, HEARTBEAT-05, HEARTBEAT-06
+**Research**: Complete — Ollama REST API verified, Anthropic Messages API documented, reqwest::blocking chosen, glob 0.3.3 for file patterns
+**Success Criteria** (what must be TRUE):
+  1. User can define heartbeat jobs in `.myco/heartbeats/` as JSON files specifying: prompt template, file inputs (globs or paths), expected output format, and schedule (interval-based)
+  2. Heartbeat loop connects to a local Ollama instance (primary) or remote API endpoint (fallback), configured in `~/.myco/preferences.json` with model selection, endpoint URL, and API keys
+  3. Jobs run on their configured interval, feeding the specified project files as context to the LLM prompt, and storing structured results in `.myco/heartbeats/results/` with a configurable retention limit (default: 10 results per job, configurable in settings)
+  4. User can open an Agentic Heartbeat cap that shows all configured jobs, their last run status/time, and results — with the most recent findings surfaced prominently
+  5. Heartbeat results can trigger toast notifications for findings that exceed a configured severity threshold (e.g., new security concern detected)
+  6. The heartbeat loop runs as a background task that persists while the project is open, with graceful handling of Ollama being unavailable (retry with backoff, clear status in cap)
+**Plans**: 5 plans
+**UI hint**: yes
+
+Plans:
+
+**Wave 1** *(foundation — parallel)*
+- [ ] 10-01-PLAN.md -- Core types, LLM client, job config, and prompt assembly (HeartbeatJob/Result/Severity structs, Ollama+Anthropic reqwest::blocking client, job JSON loader with security validation, template variable resolution, GlobalPreferences LlmConfig extension)
+- [ ] 10-02-PLAN.md -- Right sidebar framework and PanelType::Heartbeat (extensible RightSidebarState, HeartbeatBrowserState, PanelType::Heartbeat variant, InputAction extensions, GPU renderer stubs for sidebar and cap)
+
+**Wave 2** *(scheduler, depends on Wave 1)*
+- [ ] 10-03-PLAN.md -- Background heartbeat scheduler (named thread with interval timer, job execution pipeline: glob resolve -> prompt assemble -> LLM call -> severity parse -> result persist, exponential backoff for Ollama unavailability, concurrency control, SchedulerCommand channel)
+
+**Wave 3** *(integration + polish, depends on Wave 2)*
+- [ ] 10-04-PLAN.md -- App.rs wiring and stats bar (scheduler lifecycle, HeartbeatEvent handling, rendering dispatch for sidebar + caps, InputAction routing, grid layout right sidebar deduction, file watcher job reload, toast notifications, stats bar heartbeat indicator with pulsing dot)
+- [ ] 10-05-PLAN.md -- Polish and verification (job toggle persist, README.md generation, Ollama auto-detect, PanelType::Heartbeat config serialization, human verification checkpoint)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8/9 (parallel)
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8/9 (parallel) -> 10
 Note: Phase 4 depends only on Phase 1 and could run in parallel with Phases 2-3 if resources allow.
 Note: Phase 9 (Grid Layout Refactor) can run in parallel with Phase 8 — they touch different code areas. Merge Phase 9 first before final Phase 8 integration.
+Note: Phase 10 (Agentic Heartbeat) depends on Phase 6+8 patterns. Research complete.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -235,3 +266,4 @@ Note: Phase 9 (Grid Layout Refactor) can run in parallel with Phase 8 — they t
 | 7. Testing Infrastructure | 3/3 | Complete | 2026-05-17 |
 | 8. Agent Monitor Cap | 3/3 | Complete | 2026-05-18 |
 | 9. Grid Layout Refactor | 3/3 | Complete | 2026-05-18 |
+| 10. Agentic Heartbeat Cap | 0/5 | Not started | - |
