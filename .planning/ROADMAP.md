@@ -198,7 +198,7 @@ Plans:
 - [x] 09-02-PLAN.md -- N-ary tree operations and config migration (same-axis flattening, cross-axis nesting, container collapse, min size rejection, v1->v2 config migration)
 
 **Wave 3** *(depends on Waves 1+2)*
-- [ ] 09-03-PLAN.md -- Tree-walk dividers and app integration (nested divider computation, container-local drag, constrained warning, split toast, config loading update)
+- [x] 09-03-PLAN.md -- Tree-walk dividers and app integration (nested divider computation, container-local drag, constrained warning, split toast, config loading update)
 
 ### Phase 8: Agent Monitor Cap
 **Goal**: User can open a dedicated panel that displays all running AI agent sessions with real-time status, resource usage, token spend, and intervention history — promoting the toast-based monitoring from Phase 6 into a full first-class cap
