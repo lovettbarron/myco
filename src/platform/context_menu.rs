@@ -16,6 +16,12 @@ pub const CTX_TAG_FREEZE: u32 = 3000;
 pub const CTX_TAG_UNFREEZE: u32 = 3001;
 pub const CTX_TAG_CLOSE_PANEL: u32 = 3002;
 
+pub const CTX_TAG_AGENT_FOCUS: u32 = 4000;
+pub const CTX_TAG_AGENT_FREEZE: u32 = 4001;
+pub const CTX_TAG_AGENT_UNFREEZE: u32 = 4002;
+pub const CTX_TAG_AGENT_KILL: u32 = 4003;
+pub const CTX_TAG_AGENT_COPY_STATS: u32 = 4004;
+
 pub fn show_sidebar_context_menu(
     window: &winit::window::Window,
     x: f32,
@@ -138,6 +144,62 @@ pub fn show_panel_context_menu(
         // the top -- same as our logical coordinate system. No transform needed.
         let ns_point = NSPoint::new(x as f64, y as f64);
 
+        menu.popUpMenuPositioningItem_atLocation_inView(None, ns_point, Some(ns_view));
+    });
+}
+
+/// Show a native context menu for an agent row in the Agent Monitor panel.
+///
+/// Displays Focus Terminal, Freeze/Unfreeze (conditional), Kill, separator, Copy Stats.
+pub fn show_agent_monitor_context_menu(
+    window: &winit::window::Window,
+    x: f32,
+    y: f32,
+    is_frozen: bool,
+) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+
+    let RawWindowHandle::AppKit(handle) = window.window_handle().unwrap().as_raw() else {
+        return;
+    };
+
+    let ns_view: &NSView = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+
+    super::menu::with_menu_handler(|handler| {
+        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), ns_string!(""));
+        let action_sel = sel!(handleMenuAction:);
+
+        // Focus Terminal
+        let item = make_item(mtm, "Focus Terminal", action_sel, CTX_TAG_AGENT_FOCUS);
+        unsafe { item.setTarget(Some(handler)) };
+        menu.addItem(&item);
+
+        // Freeze/Unfreeze (conditional)
+        if is_frozen {
+            let item = make_item(mtm, "Unfreeze Process", action_sel, CTX_TAG_AGENT_UNFREEZE);
+            unsafe { item.setTarget(Some(handler)) };
+            menu.addItem(&item);
+        } else {
+            let item = make_item(mtm, "Freeze Process", action_sel, CTX_TAG_AGENT_FREEZE);
+            unsafe { item.setTarget(Some(handler)) };
+            menu.addItem(&item);
+        }
+
+        // Kill
+        let item = make_item(mtm, "Kill Agent", action_sel, CTX_TAG_AGENT_KILL);
+        unsafe { item.setTarget(Some(handler)) };
+        menu.addItem(&item);
+
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+
+        // Copy Stats
+        let item = make_item(mtm, "Copy Stats", action_sel, CTX_TAG_AGENT_COPY_STATS);
+        unsafe { item.setTarget(Some(handler)) };
+        menu.addItem(&item);
+
+        let ns_point = NSPoint::new(x as f64, y as f64);
         menu.popUpMenuPositioningItem_atLocation_inView(None, ns_point, Some(ns_view));
     });
 }

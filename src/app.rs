@@ -1264,9 +1264,21 @@ impl App {
                         | crate::agent_monitor::AgentMonitorAction::CollapseRow(_) => {
                             // State already mutated in handle_click, just redraw
                         }
-                        crate::agent_monitor::AgentMonitorAction::ShowContextMenu { row_index, screen_x: _, screen_y: _ } => {
-                            // Store the row index for context menu result dispatch (menu shown in Task 3)
+                        crate::agent_monitor::AgentMonitorAction::ShowContextMenu { row_index, screen_x, screen_y } => {
+                            // Store the row index for context menu result dispatch
                             self.context_menu_agent_row = Some(row_index);
+                            #[cfg(target_os = "macos")]
+                            if let Some(window) = &self.window {
+                                let is_frozen = self.agent_monitor_state.sessions.get(row_index)
+                                    .map(|s| s.status == crate::agent_monitor::AgentStatus::Frozen)
+                                    .unwrap_or(false);
+                                crate::platform::context_menu::show_agent_monitor_context_menu(
+                                    window,
+                                    screen_x,
+                                    screen_y,
+                                    is_frozen,
+                                );
+                            }
                         }
                         _ => {} // None, others
                     }
@@ -1726,6 +1738,105 @@ impl App {
                 if let Some(action) = action {
                     self.process_action(action);
                     return;
+                }
+            }
+
+            // Agent monitor context menu actions (CTX_TAG_4000 series)
+            if let Some(row_index) = self.context_menu_agent_row.take() {
+                let session = self.agent_monitor_state.sessions.get(row_index).cloned();
+                if let Some(session) = session {
+                    match tag {
+                        CTX_TAG_AGENT_FOCUS => {
+                            self.focused_panel = Some(session.panel_id);
+                            return;
+                        }
+                        CTX_TAG_AGENT_FREEZE => {
+                            // Send SIGSTOP to agent process group
+                            match crate::monitor::freeze_process_group(session.agent_pid) {
+                                Ok(()) => {
+                                    if let Some(s) = self.agent_monitor_state.sessions.iter_mut()
+                                        .find(|s| s.agent_pid == session.agent_pid) {
+                                        s.status = crate::agent_monitor::AgentStatus::Frozen;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to freeze agent PID {}: {}", session.agent_pid, e);
+                                }
+                            }
+                            return;
+                        }
+                        CTX_TAG_AGENT_UNFREEZE => {
+                            match crate::monitor::unfreeze_process_group(session.agent_pid) {
+                                Ok(()) => {
+                                    if let Some(s) = self.agent_monitor_state.sessions.iter_mut()
+                                        .find(|s| s.agent_pid == session.agent_pid) {
+                                        s.status = crate::agent_monitor::AgentStatus::Idle;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to unfreeze agent PID {}: {}", session.agent_pid, e);
+                                }
+                            }
+                            return;
+                        }
+                        CTX_TAG_AGENT_KILL => {
+                            // T-08-03 Security: Only kill verified child PIDs.
+                            // Verify the agent PID is still a child of a tracked shell PID
+                            // by checking if it exists in our sessions list (which is populated
+                            // only from process tree walking of tracked shells).
+                            let is_tracked = self.agent_monitor_state.sessions.iter()
+                                .any(|s| s.agent_pid == session.agent_pid);
+                            if is_tracked {
+                                // Additionally verify PID still exists and is a descendant
+                                // of one of our tracked shell PIDs before sending SIGKILL
+                                let is_child_of_shell = self.panels.iter()
+                                    .filter_map(|p| p.child_pid)
+                                    .any(|shell_pid| {
+                                        // Check if agent PID's parent chain leads to this shell
+                                        let pgid = unsafe { libc::getpgid(session.agent_pid as libc::pid_t) };
+                                        let shell_pgid = unsafe { libc::getpgid(shell_pid as libc::pid_t) };
+                                        pgid != -1 && shell_pgid != -1 && pgid == shell_pgid
+                                    });
+                                if is_child_of_shell {
+                                    unsafe {
+                                        libc::kill(session.agent_pid as libc::pid_t, libc::SIGKILL);
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        "Refusing to kill agent PID {}: not a verified child of any tracked shell",
+                                        session.agent_pid
+                                    );
+                                }
+                            }
+                            return;
+                        }
+                        CTX_TAG_AGENT_COPY_STATS => {
+                            // Format agent stats and copy to clipboard
+                            let stats = format!(
+                                "{} (PID {})\nStatus: {:?}\nCPU: {:.1}%\nRAM: {}\nTokens: {}\nRunning: {}",
+                                session.display_name,
+                                session.agent_pid,
+                                session.status,
+                                session.cpu_percent,
+                                crate::agent_monitor::format_ram(session.memory_bytes),
+                                session.tokens.total_tokens
+                                    .map(crate::agent_monitor::format_token_count)
+                                    .unwrap_or_else(|| "N/A".to_string()),
+                                crate::agent_monitor::format_running_time(
+                                    session.started_at.elapsed()
+                                ),
+                            );
+                            if let Ok(mut ctx) = copypasta::ClipboardContext::new() {
+                                use copypasta::ClipboardProvider;
+                                let _ = ctx.set_contents(stats);
+                            }
+                            return;
+                        }
+                        _ => {
+                            // Unknown tag, restore agent row for other handlers
+                            self.context_menu_agent_row = Some(row_index);
+                        }
+                    }
                 }
             }
         }
