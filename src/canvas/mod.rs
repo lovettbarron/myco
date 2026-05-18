@@ -1,6 +1,6 @@
-//! TLDraw canvas cap module.
+//! Excalidraw canvas cap module.
 //!
-//! Manages wry WebView instances for TLDraw canvas panels, including creation,
+//! Manages wry WebView instances for Excalidraw canvas panels, including creation,
 //! destruction, IPC message handling (auto-save, shortcut forwarding), and
 //! webview focus management.
 
@@ -19,7 +19,7 @@ mod state;
 
 pub use state::CanvasState;
 
-/// Manages all canvas (TLDraw webview) instances in the workspace.
+/// Manages all canvas (Excalidraw webview) instances in the workspace.
 ///
 /// Maps PanelId to CanvasState and WebView, following the TerminalManager pattern.
 pub struct CanvasManager {
@@ -55,15 +55,15 @@ impl CanvasManager {
             tracing::warn!("Failed to write context files: {}", e);
         }
 
-        let tldr_path = canvas_dir.join(format!("{}.tldr", canvas_id));
-        let state = CanvasState::new(canvas_id.to_string(), tldr_path.clone());
+        let file_path = canvas_dir.join(format!("{}.excalidraw", canvas_id));
+        let state = CanvasState::new(canvas_id.to_string(), file_path.clone());
 
         // Create webview with custom protocol and IPC
         let webview = self.build_webview(window, bounds, panel_id, proxy)?;
 
-        // If .tldr file exists, load it into the webview after TLDraw initializes
-        if tldr_path.exists() {
-            let content = std::fs::read_to_string(&tldr_path)?;
+        // If .excalidraw file exists, load it into the webview after Excalidraw initializes
+        if file_path.exists() {
+            let content = std::fs::read_to_string(&file_path)?;
             let escaped = content
                 .replace('\\', "\\\\")
                 .replace('\'', "\\'")
@@ -77,7 +77,7 @@ impl CanvasManager {
 
         self.canvases.insert(panel_id, state);
         self.webviews.insert(panel_id, webview);
-        debug!("Created canvas for panel {:?} at {:?}", panel_id, tldr_path);
+        debug!("Created canvas for panel {:?} at {:?}", panel_id, file_path);
         Ok(())
     }
 
@@ -155,12 +155,12 @@ impl CanvasManager {
                 Some("save") => {
                     if let Some(data) = parsed.get("data") {
                         if let Some(state) = self.canvases.get(panel_id) {
-                            // Write .tldr file (D-02: auto-save)
+                            // Write .excalidraw file (D-02: auto-save)
                             let content = serde_json::to_string_pretty(data)
                                 .unwrap_or_default();
                             if content.len() <= 50 * 1024 * 1024 {
                                 // 50MB limit (security T-03-02)
-                                let _ = std::fs::write(&state.tldr_path, &content);
+                                let _ = std::fs::write(&state.file_path, &content);
                                 debug!(
                                     "Auto-saved canvas {:?} ({} bytes)",
                                     panel_id,

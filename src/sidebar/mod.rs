@@ -186,7 +186,7 @@ impl SidebarState {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             match ext {
                 "md" | "markdown" => Some(SidebarAction::OpenMarkdown(path)),
-                "tldr" => Some(SidebarAction::OpenCanvas(path)),
+                "excalidraw" => Some(SidebarAction::OpenCanvas(path)),
                 _ => None, // Other file types not handled in Phase 3
             }
         }
@@ -201,7 +201,7 @@ impl SidebarState {
             .unwrap_or_default()
             .as_secs();
         let canvas_id = format!("canvas-{}", timestamp);
-        let path = canvas_dir.join(format!("{}.tldr", canvas_id));
+        let path = canvas_dir.join(format!("{}.excalidraw", canvas_id));
         Some(SidebarAction::CreateCanvas(canvas_id, path))
     }
 

@@ -584,7 +584,7 @@ impl App {
                     "md" | "markdown" => {
                         self.process_action(InputAction::OpenMarkdown { path });
                     }
-                    "tldr" => {
+                    "excalidraw" => {
                         let canvas_id = path
                             .file_stem()
                             .map(|s| s.to_string_lossy().to_string())
@@ -1387,15 +1387,14 @@ impl App {
                     "md" | "markdown" => {
                         self.process_action(InputAction::OpenMarkdown { path });
                     }
-                    "tldr" => {
-                        // Extract canvas_id from filename
+                    "excalidraw" => {
                         let canvas_id = path
                             .file_stem()
                             .map(|s| s.to_string_lossy().to_string())
                             .unwrap_or_else(|| "unknown".to_string());
                         self.create_canvas_with_id(&canvas_id);
                     }
-                    _ => {} // Other file types ignored in Phase 3
+                    _ => {}
                 }
             }
             InputAction::SidebarNewCanvas => {

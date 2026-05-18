@@ -9,10 +9,13 @@ export default defineConfig({
     assetsDir: 'assets',
     rollupOptions: {
       output: {
-        entryFileNames: 'tldraw-app.js',
+        entryFileNames: 'excalidraw-app.js',
         chunkFileNames: 'assets/[name].js',
         assetFileNames: 'assets/[name][extname]',
       },
     },
+  },
+  define: {
+    'process.env.IS_PREACT': JSON.stringify('false'),
   },
 });

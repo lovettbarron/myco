@@ -203,7 +203,7 @@ impl ProjectConfig {
                 let file = panel
                     .canvas_id
                     .as_ref()
-                    .map(|id| format!(".myco/canvas/{}.tldr", id));
+                    .map(|id| format!(".myco/canvas/{}.excalidraw", id));
                 CapConfig {
                     cap_type: CapType::Canvas,
                     file,
@@ -566,7 +566,7 @@ mod tests {
                         TreeNodeConfig::Leaf {
                             cap: CapConfig {
                                 cap_type: CapType::Canvas,
-                                file: Some(".myco/canvas/sketch.tldr".to_string()),
+                                file: Some(".myco/canvas/sketch.excalidraw".to_string()),
                                 cwd: None,
                             },
                             weight: 0.5,

@@ -21,3 +21,7 @@
 # Proptest regression files
 proptest-regressions/
 *.proptest-regressions
+
+# Frontend dependencies and build output
+node_modules/
+resources/excalidraw/dist/

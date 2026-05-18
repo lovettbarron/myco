@@ -1,6 +1,6 @@
 use std::path::Path;
 
-/// Load a bundled TLDraw asset by path. Returns (content_bytes, mime_type).
+/// Load a bundled Excalidraw asset by path. Returns (content_bytes, mime_type).
 pub fn load_bundled_asset(path: &str) -> (Vec<u8>, &'static str) {
     let clean_path = path.trim_start_matches('/');
 
@@ -9,7 +9,7 @@ pub fn load_bundled_asset(path: &str) -> (Vec<u8>, &'static str) {
     {
         let dist_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
-            .join("tldraw")
+            .join("excalidraw")
             .join("dist");
         let file_path = dist_dir.join(clean_path);
         if file_path.exists() {
@@ -20,14 +20,14 @@ pub fn load_bundled_asset(path: &str) -> (Vec<u8>, &'static str) {
     }
 
     // Fallback: serve index.html for root or unknown paths
-    let fallback = include_bytes!("../../resources/tldraw/dist/index.html");
+    let fallback = include_bytes!("../../resources/excalidraw/dist/index.html");
     match clean_path {
         "index.html" | "" => (fallback.to_vec(), "text/html"),
         p => {
             // Try to load from dist directory at runtime
             let dist_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("resources")
-                .join("tldraw")
+                .join("excalidraw")
                 .join("dist");
             let file_path = dist_dir.join(p);
             if file_path.exists() {

@@ -42,7 +42,7 @@ pub struct Panel {
     pub title: String,
     /// Optional file path associated with this panel (e.g., markdown file).
     pub file_path: Option<PathBuf>,
-    /// Optional canvas identifier (used as filename without .tldr extension).
+    /// Optional canvas identifier (used as filename without .excalidraw extension).
     pub canvas_id: Option<String>,
     /// Whether this panel's process is frozen (paused).
     pub frozen: bool,
@@ -79,7 +79,7 @@ impl Panel {
 
     /// Create a new canvas panel with the given ID and canvas identifier.
     pub fn new_canvas(id: PanelId, canvas_id: String) -> Self {
-        let title = format!("{}.tldr", canvas_id);
+        let title = format!("{}.excalidraw", canvas_id);
         Self {
             id,
             panel_type: PanelType::Canvas,
