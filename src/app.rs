@@ -4561,6 +4561,48 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
+                // Intercept keys when sidebar search is active
+                if let Some(sidebar) = &self.sidebar {
+                    if sidebar.search.active && event.state == ElementState::Pressed {
+                        use winit::keyboard::{Key, NamedKey};
+                        let search_action = match &event.logical_key {
+                            Key::Named(NamedKey::Escape) => Some(InputAction::ProjectSearchClose),
+                            Key::Named(NamedKey::Backspace) => {
+                                Some(InputAction::ProjectSearchBackspace)
+                            }
+                            Key::Named(NamedKey::Enter) => {
+                                // Enter on a search result could open it -- for now ignore
+                                None
+                            }
+                            Key::Character(c)
+                                if self.modifiers.super_key()
+                                    && self.modifiers.shift_key()
+                                    && c.as_str() == "f" =>
+                            {
+                                Some(InputAction::ProjectSearchClose) // toggle off with same shortcut
+                            }
+                            Key::Character(c)
+                                if !self.modifiers.super_key()
+                                    && !self.modifiers.control_key()
+                                    && !self.modifiers.alt_key() =>
+                            {
+                                c.chars()
+                                    .next()
+                                    .map(|ch| InputAction::ProjectSearchChar { ch })
+                            }
+                            _ => None, // Let other shortcuts (Cmd+Q, Cmd+B, etc.) fall through
+                        };
+                        if let Some(action) = search_action {
+                            self.process_action(action);
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                            return;
+                        }
+                        // For non-search keys, fall through to normal key handling
+                    }
+                }
+
                 let panel_type = self.focused_panel_type();
                 let search_open = self
                     .focused_panel
