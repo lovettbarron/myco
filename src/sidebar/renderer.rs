@@ -6,6 +6,28 @@ use crate::theme::{Theme, linear_to_srgb_u8};
 
 use super::{SidebarState, ENTRY_HEIGHT_PX};
 
+/// Determine file text color based on extension.
+fn file_color_for_extension(path: &std::path::Path, theme: &Theme) -> [f32; 4] {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        // Canvas files — accent color (stands out as Myco-native)
+        "excalidraw" => theme.divider_hover,
+        // Markdown — accent color (primary content type)
+        "md" | "markdown" => theme.markdown_heading_text,
+        // Source code — success/green
+        "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "c" | "cpp" | "h" | "hpp"
+        | "java" | "rb" | "swift" | "kt" | "sh" | "zsh" | "bash" | "fish" => theme.success,
+        // Config/data — warning/yellow
+        "toml" | "yaml" | "yml" | "json" | "xml" | "csv" | "env" | "ini" | "cfg" => theme.warning,
+        // Lock files and build artifacts — muted
+        "lock" | "sum" | "mod" => theme.fg_secondary,
+        // Everything else — default text
+        _ => theme.title_bar_text,
+    }
+}
+
 /// Metadata for sidebar text area positioning.
 pub struct SidebarTextAreaMeta {
     pub left: f32,
@@ -156,10 +178,8 @@ impl SidebarRenderer {
 
             let text_color = if entry.is_dir {
                 theme.sidebar_folder_text
-            } else if state.selected == Some(i) {
-                theme.title_bar_text // brighter for selected
             } else {
-                theme.title_bar_text
+                file_color_for_extension(&entry.path, theme)
             };
             let weight = if state.selected == Some(i) {
                 Weight::SEMIBOLD
