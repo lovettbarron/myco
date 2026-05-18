@@ -19,6 +19,7 @@ pub const ACT_FONT_SIZE_UP: &str = "font_size_up";
 pub const ACT_FONT_SIZE_DOWN: &str = "font_size_down";
 pub const ACT_TOGGLE_FULLSCREEN: &str = "toggle_fullscreen";
 pub const ACT_OPEN_AGENT_MONITOR: &str = "open_agent_monitor";
+pub const ACT_PROJECT_SEARCH: &str = "project_search";
 pub const ACT_QUIT: &str = "quit";
 
 /// List of all known valid action IDs.
@@ -40,6 +41,7 @@ pub const KNOWN_ACTIONS: &[&str] = &[
     ACT_FONT_SIZE_DOWN,
     ACT_TOGGLE_FULLSCREEN,
     ACT_OPEN_AGENT_MONITOR,
+    ACT_PROJECT_SEARCH,
     ACT_QUIT,
 ];
 
@@ -107,6 +109,10 @@ pub fn default_shortcuts() -> Vec<ShortcutEntry> {
         },
         ShortcutEntry {
             action: ACT_TOGGLE_FULLSCREEN.to_string(),
+            keys: vec!["cmd+ctrl+f".to_string()],
+        },
+        ShortcutEntry {
+            action: ACT_PROJECT_SEARCH.to_string(),
             keys: vec!["cmd+shift+f".to_string()],
         },
         ShortcutEntry {
@@ -135,9 +141,9 @@ mod tests {
     }
 
     #[test]
-    fn default_shortcuts_has_17_bindings() {
+    fn default_shortcuts_has_18_bindings() {
         let defaults = default_shortcuts();
-        assert_eq!(defaults.len(), 17);
+        assert_eq!(defaults.len(), 18);
     }
 
     #[test]

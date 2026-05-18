@@ -1,4 +1,5 @@
 pub mod renderer;
+pub mod search;
 
 use std::path::{Path, PathBuf};
 use tracing::debug;
@@ -54,6 +55,8 @@ pub struct SidebarState {
     pub projects: Vec<ProjectEntry>,
     /// Whether to show the .git directory in the file tree.
     pub show_git_directory: bool,
+    /// Project-wide file search state.
+    pub search: search::SearchState,
 }
 
 impl SidebarState {
@@ -73,6 +76,7 @@ impl SidebarState {
             expanded_dirs,
             projects: Vec::new(),
             show_git_directory,
+            search: search::SearchState::new(),
         };
         state.refresh_file_tree();
         state
@@ -244,6 +248,50 @@ impl SidebarState {
     /// Set the list of registered projects for the sidebar project switcher.
     pub fn set_projects(&mut self, projects: Vec<ProjectEntry>) {
         self.projects = projects;
+    }
+
+    /// Whether the sidebar search mode is currently active.
+    pub fn search_active(&self) -> bool {
+        self.search.active
+    }
+
+    /// Handle a click in search mode at the given y position within the sidebar viewport.
+    /// Returns a SidebarAction if a match line for an openable file was clicked.
+    pub fn search_click_at_y(&mut self, y: f32) -> Option<SidebarAction> {
+        if !self.search.active {
+            return None;
+        }
+        let header_offset = 16.0 + 15.6 + 8.0; // SEARCH header
+        let input_offset = header_offset + ENTRY_HEIGHT; // input box
+        let count_offset = input_offset + ENTRY_HEIGHT; // results count
+        let entries_start = count_offset;
+
+        let adjusted_y = y + self.search.scroll_offset;
+        if adjusted_y < entries_start {
+            return None;
+        }
+
+        let entry_idx = ((adjusted_y - entries_start) / ENTRY_HEIGHT) as usize;
+        let flat = self.search.flat_entries();
+        if entry_idx >= flat.len() {
+            return None;
+        }
+
+        match flat[entry_idx] {
+            search::SearchFlatEntry::FileHeader(file_idx) => {
+                self.search.toggle_file_expansion(file_idx);
+                None
+            }
+            search::SearchFlatEntry::MatchLine(file_idx, _match_idx) => {
+                let path = self.search.results[file_idx].path.clone();
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                match ext {
+                    "md" | "markdown" => Some(SidebarAction::OpenMarkdown(path)),
+                    "excalidraw" => Some(SidebarAction::OpenCanvas(path)),
+                    _ => None,
+                }
+            }
+        }
     }
 }
 

@@ -1781,6 +1781,42 @@ impl App {
                     }
                 }
             }
+            InputAction::ProjectSearchToggle => {
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.search.toggle();
+                    if sidebar.search.active && !sidebar.visible {
+                        sidebar.toggle();
+                        self.recompute_layout();
+                    }
+                }
+            }
+            InputAction::ProjectSearchChar { ch } => {
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.search.push_char(ch);
+                    let dir = sidebar.project_dir().to_path_buf();
+                    sidebar.search.execute_search(&dir);
+                }
+            }
+            InputAction::ProjectSearchBackspace => {
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.search.backspace();
+                    if sidebar.search.query.is_empty() {
+                        sidebar.search.results.clear();
+                        sidebar.search.total_matches = 0;
+                    } else {
+                        let dir = sidebar.project_dir().to_path_buf();
+                        sidebar.search.execute_search(&dir);
+                    }
+                }
+            }
+            InputAction::ProjectSearchClose => {
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.search.active = false;
+                    sidebar.search.query.clear();
+                    sidebar.search.results.clear();
+                    sidebar.search.total_matches = 0;
+                }
+            }
             InputAction::Quit => {
                 // Handled in window_event before reaching process_action.
                 // This arm exists only for exhaustive match coverage.
@@ -2270,7 +2306,14 @@ impl App {
             p.panel_type == PanelType::Canvas && p.canvas_id.as_deref() == Some(canvas_id)
         }) {
             let id = existing.id;
-            self.pending_actions.push(InputAction::FocusPanel { panel_id: id });
+            debug!("Canvas {} already open in panel {:?}, focusing", canvas_id, id);
+            self.focused_panel = Some(id);
+            if let Some(cm) = &self.canvas_manager {
+                cm.set_focus(&id, true);
+            }
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
             return;
         }
         let new_id = if self.grid.is_none() {
@@ -3139,9 +3182,15 @@ impl App {
             let py_offset = py + TOP_CHROME_HEIGHT;
 
             if let Some(panel) = self.panels.iter().find(|p| p.id == panel_id) {
+                // Skip GPU text labels for canvas panels — the webview covers the
+                // content area and stray glyphs (e.g. "c" from the filename) bleed
+                // through at panel edges. Title bar quad is still rendered.
+                if panel.panel_type == PanelType::Canvas {
+                    continue;
+                }
                 // Panel title bar label (show title for markdown, type for others)
                 let mut title_text = match panel.panel_type {
-                    PanelType::Markdown | PanelType::Canvas => panel.title.clone(),
+                    PanelType::Markdown => panel.title.clone(),
                     _ => panel.panel_type.to_string(),
                 };
                 // D-09: Append snowflake indicator for frozen panels
