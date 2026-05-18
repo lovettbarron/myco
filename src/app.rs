@@ -24,6 +24,8 @@ pub enum UserEvent {
     ResourceUpdate(Vec<crate::monitor::ResourceUpdate>),
     /// Alert that a terminal process needs human attention (D-05).
     InterventionAlert(crate::monitor::InterventionAlert),
+    /// Agent discovery updates from the background monitor thread (D-08).
+    AgentUpdate(Vec<crate::agent_monitor::AgentDiscoveryUpdate>),
     #[cfg(target_os = "macos")]
     MenuAction(u32),
 }
@@ -261,6 +263,10 @@ pub struct App {
     resource_monitor: Option<crate::monitor::ResourceMonitor>,
     /// Current resource state per PID.
     resource_states: HashMap<u32, crate::monitor::ResourceState>,
+    /// Agent monitor state: tracks discovered AI agent sessions and alert history.
+    agent_monitor_state: crate::agent_monitor::AgentMonitorState,
+    /// Agent configuration: built-in + user-defined agent definitions.
+    agent_config: crate::agent_monitor::config::AgentConfig,
     /// Unified toast notification manager.
     toast_manager: crate::toast::ToastManager,
     /// Tooltip state for resource dot hover.
@@ -318,6 +324,8 @@ impl App {
             project_registry: ProjectRegistry::new(),
             resource_monitor: None,
             resource_states: HashMap::new(),
+            agent_monitor_state: crate::agent_monitor::AgentMonitorState::new(),
+            agent_config: crate::agent_monitor::config::AgentConfig::load(),
             toast_manager: crate::toast::ToastManager::new(),
             tooltip_state: None,
             sidebar_edge_hovered: false,
@@ -3164,6 +3172,37 @@ impl ApplicationHandler<UserEvent> for App {
                         Some("Focus Panel".to_string()),
                         crate::toast::INTERVENTION_TOAST_DURATION,
                     );
+                }
+
+                // Also log to agent monitor alert history (D-08)
+                self.agent_monitor_state.add_alert(crate::agent_monitor::AlertHistoryEntry {
+                    timestamp: std::time::Instant::now(),
+                    message: alert.message.clone(),
+                    tool_name: alert.tool_name.clone(),
+                    panel_id: alert.panel_id,
+                });
+            }
+            UserEvent::AgentUpdate(discoveries) => {
+                self.agent_monitor_state.update_from_discovery(&discoveries);
+
+                // Parse tokens from terminal text for each active agent session.
+                // Collect texts first to avoid borrow conflicts.
+                let panel_texts: Vec<(PanelId, String)> = self.agent_monitor_state.sessions.iter()
+                    .filter_map(|session| {
+                        self.terminal_manager.as_ref().and_then(|tm| {
+                            tm.get(&session.panel_id).and_then(|ts| {
+                                if !ts.exited {
+                                    Some((session.panel_id, Self::extract_terminal_visible_text(&ts.term)))
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    })
+                    .collect();
+
+                for (panel_id, text) in &panel_texts {
+                    self.agent_monitor_state.update_tokens(*panel_id, text, &self.agent_config);
                 }
             }
             UserEvent::FileChanged(paths) => {

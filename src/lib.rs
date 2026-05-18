@@ -1,3 +1,4 @@
+pub mod agent_monitor;
 pub mod app;
 pub mod canvas;
 #[allow(dead_code)]
