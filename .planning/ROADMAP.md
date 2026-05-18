@@ -214,7 +214,7 @@ Plans:
 
 Plans:
 - [x] 08-01-PLAN.md -- Agent discovery and data model (detect AI processes, AgentSession struct, background polling)
-- [ ] 08-02-PLAN.md -- GPU-rendered monitor panel (new PanelType::AgentMonitor, list rendering, status indicators)
+- [x] 08-02-PLAN.md -- GPU-rendered monitor panel (new PanelType::AgentMonitor, list rendering, status indicators)
 - [ ] 08-03-PLAN.md -- Interactions and token tracking (click-to-focus, freeze controls, terminal output token parsing, intervention history)
 
 ## Progress
