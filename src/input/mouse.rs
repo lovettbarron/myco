@@ -387,6 +387,17 @@ impl MouseState {
                         delta: delta_lines,
                     });
                 }
+                Some(PanelType::AgentMonitor) => {
+                    // Convert line delta to pixel delta for agent monitor scroll
+                    let pixel_delta = delta_lines * 21.0;
+                    if pixel_delta.abs() > 0.01 {
+                        actions.push(InputAction::AgentMonitorScroll {
+                            panel_id,
+                            delta: pixel_delta,
+                            cursor_y: self.cursor_y as f32,
+                        });
+                    }
+                }
                 _ => {}
             }
         }

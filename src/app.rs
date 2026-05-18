@@ -376,7 +376,8 @@ impl App {
             | InputAction::TerminalSelectionEnd { panel_id }
             | InputAction::MarkdownScroll { panel_id, .. }
             | InputAction::CanvasZoom { panel_id, .. }
-            | InputAction::CanvasIpcMessage { panel_id, .. } => {
+            | InputAction::CanvasIpcMessage { panel_id, .. }
+            | InputAction::AgentMonitorScroll { panel_id, .. } => {
                 if self.panels.iter().any(|p| p.id == *panel_id && p.frozen) {
                     return; // Block input to frozen panels
                 }
@@ -1222,6 +1223,25 @@ impl App {
                         let _ = webview.evaluate_script(&format!(
                             "if(window.editor){{var z=window.editor.getCamera().z;window.editor.setCamera({{...window.editor.getCamera(),z:z*{zoom_factor}}});}}"
                         ));
+                    }
+                }
+            }
+            InputAction::AgentMonitorScroll { panel_id: _, delta, cursor_y } => {
+                // Determine which scroll region the cursor is in based on panel bounds
+                // Use the first AgentMonitor panel's bounds (there should only be one)
+                let bounds = self.panels.iter()
+                    .find(|p| p.panel_type == PanelType::AgentMonitor)
+                    .and_then(|p| self.panel_content_bounds(p.id));
+                if let Some((_, by, _, bh)) = bounds {
+                    let divider_y = by + bh * 0.6;
+                    if cursor_y < divider_y {
+                        // Agent list region
+                        self.agent_monitor_state.agent_scroll_offset =
+                            (self.agent_monitor_state.agent_scroll_offset + delta).max(0.0);
+                    } else {
+                        // Alert log region
+                        self.agent_monitor_state.alert_scroll_offset =
+                            (self.agent_monitor_state.alert_scroll_offset + delta).max(0.0);
                     }
                 }
             }
@@ -2575,6 +2595,18 @@ impl App {
                         }
                     }
                 }
+
+                // Agent Monitor quads (session rows, status dots, sparklines, alert history)
+                if panel.panel_type == PanelType::AgentMonitor {
+                    if let Some(bounds) = self.panel_content_bounds(panel.id) {
+                        let monitor_quads = crate::agent_monitor::renderer::build_quads(
+                            &self.agent_monitor_state,
+                            bounds,
+                            &self.theme,
+                        );
+                        quads.extend(monitor_quads);
+                    }
+                }
             }
         }
 
@@ -3007,6 +3039,17 @@ impl App {
                                 }
                             }
                         }
+                    }
+                } else if panel.panel_type == PanelType::AgentMonitor {
+                    // Agent Monitor panel: render session rows, stats, and alert log
+                    if let Some(bounds) = self.panel_content_bounds(panel.id) {
+                        let monitor_labels = crate::agent_monitor::renderer::build_labels(
+                            &self.agent_monitor_state,
+                            bounds,
+                            &self.theme,
+                            std::time::Instant::now(),
+                        );
+                        labels.extend(monitor_labels);
                     }
                 } else if panel.panel_type != PanelType::Markdown {
                     // Centered type label in panel body (D-03) for non-terminal, non-markdown panels
