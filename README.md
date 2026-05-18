@@ -36,7 +36,7 @@ Terminal emulation uses `alacritty_terminal` for VTE/grid state on a background 
 ## Features
 
 - **Terminal** — Full PTY emulator with 24-bit color, scrollback, search, selection, clipboard, command history, and autocomplete
-- **Canvas** — TLDraw sketch pad embedded via webview, auto-saves `.tldr` files to the project folder
+- **Canvas** — Excalidraw sketch pad embedded via webview, auto-saves `.excalidraw` files to the project folder
 - **Markdown viewer** — GPU-rendered markdown with live file-watching reload
 - **Agent monitor** — Dedicated panel showing running AI agent sessions with status, token usage, and intervention patterns
 - **Grid layout** — Recursive split tree with draggable dividers, split/close/fullscreen operations
@@ -85,10 +85,27 @@ src/
   toast/              # Toast notification system
   watcher/            # File system watching
 resources/
-  tldraw/             # TLDraw webview app (Vite + React)
+  excalidraw/         # Excalidraw webview app (Vite + React)
 ```
 
 Config lives in `.myco` (project) and `~/.myco/` (global). JSON format for AI tool compatibility.
+
+## Building
+
+Requires Rust (1.87+) and Node.js (18+).
+
+```bash
+make build          # builds frontend + cargo build
+make release        # builds frontend + cargo build --release
+make clean          # removes all build artifacts
+```
+
+Or manually:
+
+```bash
+cd resources/excalidraw && npm install && npx vite build
+cd ../.. && cargo build
+```
 
 ## Status
 

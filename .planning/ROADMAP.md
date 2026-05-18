@@ -226,12 +226,12 @@ Note: Phase 9 (Grid Layout Refactor) can run in parallel with Phase 8 — they t
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Window, Grid, and Build Pipeline | 0/4 | Planning complete | - |
-| 2. Terminal Cap | 2/2 | Complete   | 2026-05-16 |
-| 3. Webview Caps | 1/3 | Executing | - |
-| 4. Application Frame and Theming | 0/2 | Not started | - |
-| 5. Configuration and Persistence | 4/5 | Gap closure | - |
-| 6. AI Monitoring and Ship | 0/3 | Planning complete | - |
-| 7. Testing Infrastructure | 0/3 | Planning complete | - |
-| 8. Agent Monitor Cap | 0/3 | Not started | - |
-| 9. Grid Layout Refactor | 0/3 | Not started | - |
+| 1. Window, Grid, and Build Pipeline | 4/4 | Complete | 2026-05-15 |
+| 2. Terminal Cap | 2/2 | Complete | 2026-05-16 |
+| 3. Webview Caps | 2/3 | 03-03 remaining | - |
+| 4. Application Frame and Theming | 3/3 | Complete | 2026-05-17 |
+| 5. Configuration and Persistence | 5/5 | Complete | 2026-05-17 |
+| 6. AI Monitoring and Ship | 3/3 | Complete | 2026-05-17 |
+| 7. Testing Infrastructure | 3/3 | Complete | 2026-05-17 |
+| 8. Agent Monitor Cap | 3/3 | Complete | 2026-05-18 |
+| 9. Grid Layout Refactor | 3/3 | Complete | 2026-05-18 |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: context exhaustion at 75% (2026-05-18)
-last_updated: "2026-05-18T17:20:27.281Z"
-last_activity: 2026-05-18 -- Phase 09 planning complete
+stopped_at: ~
+last_updated: "2026-05-18T20:00:00.000Z"
+last_activity: 2026-05-18 -- Phases 08+09 executed, TLDraw→Excalidraw migration (uncommitted)
 progress:
   total_phases: 9
   completed_phases: 8
-  total_plans: 26
-  completed_plans: 29
-  percent: 100
+  total_plans: 29
+  completed_plans: 28
+  percent: 97
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** The project folder is the persistent AI context surface -- sketch, code, and document in one workspace where everything saves to the folder and everything is readable by AI agents.
-**Current focus:** Phase 08 — agent-monitor-cap
+**Current focus:** Phase 03 — last remaining plan (03-03: file sidebar and focus polish)
 
 ## Current Position
 
-Phase: 08
-Plan: 3 plans in 3 waves
-Status: Ready to execute
-Last activity: 2026-05-18 -- Phase 09 planning complete
+Phase: 03 (Plan 03-03 remaining)
+Completed: Phases 01-02, 04-09 (28/29 plans)
+Status: Near-complete — one plan left + uncommitted Excalidraw migration
+Last activity: 2026-05-18 -- Phases 08+09 executed, TLDraw→Excalidraw migration
 
-Progress: [██████████] 100%
+Progress: [█████████▒] 97%
 
 ## Performance Metrics
 
@@ -103,6 +103,9 @@ Recent decisions affecting current work:
 ### Roadmap Evolution
 
 - Phase 7 added: Testing Infrastructure (headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, criterion benchmarks)
+- Phase 8 added: Agent Monitor Cap (dedicated panel for AI agent monitoring)
+- Phase 9 added: Grid Layout Refactor (N-ary split tree replacing CSS Grid)
+- TLDraw replaced with Excalidraw (MIT license, AGPL-3.0 compatible)
 
 ### Pending Todos
 
@@ -115,13 +118,12 @@ None yet.
 | 260516-gw3 | Add dev-mode performance instrumentation to render hot path | 2026-05-16 | 1ed7bef | [260516-gw3-add-dev-mode-performance-instrumentation](./quick/260516-gw3-add-dev-mode-performance-instrumentation/) |
 | 260516-cls | Column-local vertical split refactor (Cmd+D splits only focused column) | 2026-05-16 | 677ba88 | [20260516-column-local-split](./quick/20260516-column-local-split/) |
 | 260518-sip | Update intervention detection patterns for Claude Code v2.x | 2026-05-18 | fef31bc | [20260518-stale-intervention-patterns](./quick/20260518-stale-intervention-patterns/) |
-| 260518-acs | Add Cap submenu to File menu with all panel types | 2026-05-18 | pending | [20260518-add-cap-submenu](./quick/20260518-add-cap-submenu/) |
+| 260518-acs | Add Cap submenu to File menu with all panel types | 2026-05-18 | 0774c49 | [20260518-add-cap-submenu](./quick/20260518-add-cap-submenu/) |
 
 ### Blockers/Concerns
 
-- GPU text rendering scope risk: research warns this can consume months if not scoped to cosmic-text/glyphon. Must enforce strict scope in Phase 1-2 planning.
-- Hybrid rendering integration: no existing OSS project combines multiple wgpu surfaces + multiple wry webviews. Phase 3 may need a prototype spike.
-- alacritty_terminal integration gap: provides VTE/grid state but NOT rendering, input translation, selection, clipboard, or search. Phase 2 must budget significant time for this.
+- TLDraw→Excalidraw migration is complete but uncommitted (23 files changed, tests pass, compiles clean)
+- Phase 03-03 (file sidebar + focus polish) is the sole remaining plan for v1.0
 
 ## Deferred Items
 
@@ -133,7 +135,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-18T17:20:27.278Z
-Stopped at: context exhaustion at 75% (2026-05-18)
+Last session: 2026-05-18T20:00:00.000Z
+Stopped at: ~
 Resume file: None
-Pending UAT: Run `cargo run` and verify 10-point checklist (settings overlay, theme switching, layout, input isolation)
+Pending: Commit Excalidraw migration, then execute Phase 03-03 or close milestone
