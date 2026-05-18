@@ -4292,6 +4292,30 @@ impl ApplicationHandler<UserEvent> for App {
                     let sidebar_y = ly - TOP_CHROME_HEIGHT;
                     // Handle sidebar click
                     if let Some(sidebar) = &mut self.sidebar {
+                        // Search mode: route clicks to search results
+                        if sidebar.search_active() {
+                            if let Some(action) = sidebar.search_click_at_y(sidebar_y) {
+                                match action {
+                                    SidebarAction::OpenMarkdown(path) => {
+                                        self.process_action(InputAction::OpenMarkdown { path });
+                                    }
+                                    SidebarAction::OpenCanvas(path) => {
+                                        let canvas_id = path
+                                            .file_stem()
+                                            .map(|s| s.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        self.create_canvas_with_id(&canvas_id);
+                                    }
+                                    SidebarAction::CreateCanvas(canvas_id, _path) => {
+                                        self.create_canvas_with_id(&canvas_id);
+                                    }
+                                }
+                            }
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                            return;
+                        }
                         let index_result = sidebar.entry_at_y(sidebar_y);
                         debug!("Sidebar click: sidebar_y={}, entry_index={:?}", sidebar_y, index_result);
                         if let Some(index) = index_result {
@@ -4393,7 +4417,11 @@ impl ApplicationHandler<UserEvent> for App {
                     if let (Some(sidebar), Some(window)) = (&mut self.sidebar, &self.window) {
                         let size = window.inner_size();
                         let viewport_h = size.height as f32 / self.scale_factor - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
-                        sidebar.scroll(-pixel_delta, viewport_h);
+                        if sidebar.search_active() {
+                            sidebar.search.scroll(-pixel_delta, viewport_h);
+                        } else {
+                            sidebar.scroll(-pixel_delta, viewport_h);
+                        }
                     }
                 } else {
                     // Negate for natural scrolling convention: on macOS with natural
