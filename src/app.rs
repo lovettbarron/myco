@@ -421,9 +421,26 @@ impl App {
                     if let Some(new_id) =
                         operations::split_panel(grid, panel_id, SplitDirection::Horizontal)
                     {
-                        let panel = Panel::new_placeholder(new_id);
+                        let panel = Panel::new_terminal(new_id);
                         self.panels.push(panel);
+                        self.focused_panel = Some(new_id);
                         self.recompute_layout();
+
+                        if let Some(tm) = &mut self.terminal_manager {
+                            if let Some(grid) = &self.grid {
+                                if let Some(node_id) = grid.find_node(new_id) {
+                                    let (_, _, pw, ph) = grid.get_panel_rect(node_id);
+                                    let cw = self.terminal_renderer.cell_width;
+                                    let ch = self.terminal_renderer.cell_height;
+                                    let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cw).max(2.0) as usize;
+                                    let rows = ((ph - PANEL_TITLE_HEIGHT) / ch).max(1.0) as usize;
+                                    if let Err(e) = tm.create_terminal(new_id, cols, rows) {
+                                        warn!("Failed to create terminal: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        self.sync_child_pids();
                         self.auto_save.mark_dirty();
                     } else if grid.panel_count() >= 20 {
                         self.toast_manager.add(
@@ -447,9 +464,26 @@ impl App {
                     if let Some(new_id) =
                         operations::split_panel(grid, panel_id, SplitDirection::Vertical)
                     {
-                        let panel = Panel::new_placeholder(new_id);
+                        let panel = Panel::new_terminal(new_id);
                         self.panels.push(panel);
+                        self.focused_panel = Some(new_id);
                         self.recompute_layout();
+
+                        if let Some(tm) = &mut self.terminal_manager {
+                            if let Some(grid) = &self.grid {
+                                if let Some(node_id) = grid.find_node(new_id) {
+                                    let (_, _, pw, ph) = grid.get_panel_rect(node_id);
+                                    let cw = self.terminal_renderer.cell_width;
+                                    let ch = self.terminal_renderer.cell_height;
+                                    let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cw).max(2.0) as usize;
+                                    let rows = ((ph - PANEL_TITLE_HEIGHT) / ch).max(1.0) as usize;
+                                    if let Err(e) = tm.create_terminal(new_id, cols, rows) {
+                                        warn!("Failed to create terminal: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        self.sync_child_pids();
                         self.auto_save.mark_dirty();
                     } else if grid.panel_count() >= 20 {
                         self.toast_manager.add(
@@ -2063,7 +2097,7 @@ impl App {
             (GridLayout::new_single_panel(), vec![Panel::new_terminal(PanelId(0))])
         };
 
-        // Compute grid layout
+        // Compute initial grid layout (sidebar not yet initialized, full width)
         if let Some(window) = &self.window {
             let size = window.inner_size();
             if size.width > 0 && size.height > 0 {
@@ -2097,6 +2131,9 @@ impl App {
         let mut sidebar = SidebarState::new(project_path.clone(), global_prefs_for_sidebar.show_git_directory);
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
+
+        // Recompute grid now that sidebar is initialized (subtracts sidebar width)
+        self.recompute_layout();
 
         // Start file watcher
         if let Some(proxy) = &self.proxy {
@@ -3679,6 +3716,9 @@ impl ApplicationHandler<UserEvent> for App {
         let mut sidebar = SidebarState::new(project_dir.clone(), global_prefs_for_sidebar.show_git_directory);
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
+
+        // Recompute grid now that sidebar is initialized (subtracts sidebar width)
+        self.recompute_layout();
 
         // Start file watcher for live markdown updates (CAP-04)
         if let Some(proxy) = &self.proxy {
