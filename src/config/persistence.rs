@@ -56,7 +56,15 @@ pub fn load_project_config(project_dir: &Path) -> Option<ProjectConfig> {
     };
 
     match serde_json::from_str::<ProjectConfig>(&contents) {
-        Ok(config) => Some(config),
+        Ok(mut config) => {
+            // Auto-migrate v1 configs to v2
+            if config.version <= 1 && config.tree_layout.is_none() {
+                tracing::info!("Migrating config from version {} to version 2 (tree layout)", config.version);
+                config.tree_layout = Some(migrate_v1_to_v2(&config.layout));
+                config.version = 2;
+            }
+            Some(config)
+        }
         Err(e) => {
             warn!("Failed to parse config file: {}", e);
             None
@@ -126,6 +134,13 @@ pub fn validate_config(config: &ProjectConfig) -> bool {
         }
     }
 
+    // Also validate tree_layout if present
+    if let Some(ref tree_layout) = config.tree_layout {
+        if !validate_tree_config(&tree_layout.tree, 0) {
+            return false;
+        }
+    }
+
     true
 }
 
@@ -149,28 +164,96 @@ fn is_safe_relative_path(path: &str) -> bool {
 }
 
 /// Convert a v1 column-based layout to a v2 tree-based layout.
-fn migrate_v1_to_v2(_layout: &super::project::LayoutConfig) -> super::project::TreeLayoutConfig {
-    // Stub: returns empty tree (tests will fail)
-    super::project::TreeLayoutConfig {
-        tree: super::project::TreeNodeConfig::Leaf {
-            cap: super::project::CapConfig {
-                cap_type: super::project::CapType::Terminal,
-                file: None,
-                cwd: None,
+///
+/// Maps the old column structure to the new tree structure:
+/// - Single column -> single leaf
+/// - Multiple columns -> horizontal branch with leaf/branch children
+/// - Stack column -> vertical branch with leaf children
+fn migrate_v1_to_v2(layout: &super::project::LayoutConfig) -> super::project::TreeLayoutConfig {
+    use super::project::{ColumnConfig, TreeNodeConfig, TreeLayoutConfig};
+
+    let children: Vec<TreeNodeConfig> = layout.columns.iter().map(|col| {
+        match col {
+            ColumnConfig::Single(cap) => TreeNodeConfig::Leaf {
+                cap: cap.clone(),
+                weight: 1.0,
             },
-            weight: 1.0,
-        },
+            ColumnConfig::Stack { caps } => {
+                let leaves: Vec<TreeNodeConfig> = caps.iter().map(|cap| {
+                    TreeNodeConfig::Leaf { cap: cap.clone(), weight: 1.0 }
+                }).collect();
+                let n = leaves.len();
+                TreeNodeConfig::Branch {
+                    direction: "vertical".to_string(),
+                    children: leaves,
+                    weights: vec![1.0 / n as f32; n],
+                }
+            }
+        }
+    }).collect();
+
+    if children.len() == 1 {
+        TreeLayoutConfig { tree: children.into_iter().next().unwrap() }
+    } else if children.is_empty() {
+        // Fallback: empty config -> single terminal leaf
+        TreeLayoutConfig {
+            tree: TreeNodeConfig::Leaf {
+                cap: super::project::CapConfig {
+                    cap_type: super::project::CapType::Terminal,
+                    file: None,
+                    cwd: None,
+                },
+                weight: 1.0,
+            },
+        }
+    } else {
+        let n = children.len();
+        TreeLayoutConfig {
+            tree: TreeNodeConfig::Branch {
+                direction: "horizontal".to_string(),
+                children,
+                weights: vec![1.0 / n as f32; n],
+            }
+        }
     }
 }
+
+/// Maximum allowed tree depth (T-09-03: DoS protection).
+const MAX_TREE_DEPTH: usize = 10;
 
 /// Validate a tree config recursively.
 ///
 /// Checks:
-/// - Depth does not exceed 10 levels (DoS protection)
+/// - Depth does not exceed 10 levels (DoS protection per T-09-03)
 /// - All file/cwd paths are safe relative paths (T-09-04)
-pub fn validate_tree_config(_tree: &super::project::TreeNodeConfig, _depth: usize) -> bool {
-    // Stub: always returns true (tests will fail for reject cases)
-    true
+pub fn validate_tree_config(tree: &super::project::TreeNodeConfig, depth: usize) -> bool {
+    use super::project::TreeNodeConfig;
+
+    if depth > MAX_TREE_DEPTH {
+        warn!("Config validation failed: tree depth {} exceeds max {}", depth, MAX_TREE_DEPTH);
+        return false;
+    }
+
+    match tree {
+        TreeNodeConfig::Leaf { cap, .. } => {
+            if let Some(ref file) = cap.file {
+                if !is_safe_relative_path(file) {
+                    warn!("Config validation failed: unsafe file path in tree {:?}", file);
+                    return false;
+                }
+            }
+            if let Some(ref cwd) = cap.cwd {
+                if !is_safe_relative_path(cwd) {
+                    warn!("Config validation failed: unsafe cwd path in tree {:?}", cwd);
+                    return false;
+                }
+            }
+            true
+        }
+        TreeNodeConfig::Branch { children, .. } => {
+            children.iter().all(|child| validate_tree_config(child, depth + 1))
+        }
+    }
 }
 
 /// Auto-save state machine with debounce timer.
@@ -249,8 +332,10 @@ mod tests {
 
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
-        assert_eq!(loaded.version, 1);
+        // V1 config is auto-migrated to v2 on load
+        assert_eq!(loaded.version, 2);
         assert_eq!(loaded.metadata.name, "roundtrip-test");
+        assert!(loaded.tree_layout.is_some(), "V1 config should have tree_layout after migration");
     }
 
     #[test]

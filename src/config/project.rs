@@ -165,6 +165,16 @@ impl ProjectConfig {
     }
 
     /// Convert a Panel to a CapConfig, making paths relative to project_dir.
+    /// Public version for use by layout.rs to_tree_config.
+    pub fn cap_config_from_panel_public(
+        panel: &crate::grid::Panel,
+        terminal_manager: Option<&crate::terminal::TerminalManager>,
+        project_dir: &std::path::Path,
+    ) -> CapConfig {
+        Self::cap_config_from_panel(panel, terminal_manager, project_dir)
+    }
+
+    /// Convert a Panel to a CapConfig, making paths relative to project_dir.
     fn cap_config_from_panel(
         panel: &crate::grid::Panel,
         terminal_manager: Option<&crate::terminal::TerminalManager>,

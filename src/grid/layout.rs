@@ -876,6 +876,191 @@ impl GridLayout {
             split_tree,
         }
     }
+
+    /// Create a grid layout from a TreeLayoutConfig (version 2 config format).
+    ///
+    /// Recursively builds TaffyTree and SplitNode from TreeNodeConfig.
+    pub fn from_tree_config(config: &crate::config::TreeLayoutConfig) -> Self {
+        let mut tree = TaffyTree::new();
+        let mut panels = Vec::new();
+        let mut next_id: u64 = 0;
+
+        let split_tree = build_split_from_tree_config(&config.tree, &mut tree, &mut panels, &mut next_id);
+
+        let root_child = split_tree.taffy_node_id();
+        let root = tree.new_with_children(
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                size: Size {
+                    width: percent(1.0),
+                    height: percent(1.0),
+                },
+                grid_template_columns: vec![fr(1.0)],
+                grid_template_rows: vec![fr(1.0)],
+                ..Default::default()
+            },
+            &[root_child],
+        ).unwrap();
+
+        Self {
+            tree,
+            root,
+            panels,
+            next_id,
+            fullscreen_state: None,
+            column_containers: HashSet::new(),
+            split_tree,
+        }
+    }
+
+    /// Create a grid layout from a ProjectConfig, dispatching based on version.
+    ///
+    /// Uses from_tree_config for v2 configs with tree_layout, falls back to
+    /// from_config for v1 configs.
+    pub fn from_project_config(config: &crate::config::ProjectConfig) -> Self {
+        if let Some(ref tree_layout) = config.tree_layout {
+            Self::from_tree_config(tree_layout)
+        } else {
+            Self::from_config(&config.layout)
+        }
+    }
+
+    /// Convert the current grid layout to a TreeLayoutConfig.
+    ///
+    /// Recursively walks the SplitNode tree and converts each node to
+    /// a TreeNodeConfig, with panel data from the provided panels.
+    pub fn to_tree_config(
+        &self,
+        panels: &[crate::grid::Panel],
+        terminal_manager: Option<&crate::terminal::TerminalManager>,
+        project_dir: &std::path::Path,
+    ) -> crate::config::TreeLayoutConfig {
+        let tree = split_node_to_tree_config(
+            &self.split_tree,
+            &self.panels,
+            panels,
+            terminal_manager,
+            project_dir,
+        );
+        crate::config::TreeLayoutConfig { tree }
+    }
+}
+
+/// Recursively build a SplitNode tree from a TreeNodeConfig.
+fn build_split_from_tree_config(
+    config: &crate::config::TreeNodeConfig,
+    taffy: &mut TaffyTree<()>,
+    panels: &mut Vec<(NodeId, PanelId)>,
+    next_id: &mut u64,
+) -> SplitNode {
+    use crate::config::TreeNodeConfig;
+
+    match config {
+        TreeNodeConfig::Leaf { weight, .. } => {
+            let mut style = leaf_panel_style();
+            style.flex_grow = *weight;
+            let node = taffy.new_leaf(style).unwrap();
+            let panel_id = PanelId(*next_id);
+            *next_id += 1;
+            panels.push((node, panel_id));
+            SplitNode::Leaf {
+                panel_id,
+                taffy_node: node,
+            }
+        }
+        TreeNodeConfig::Branch { direction, children, weights } => {
+            let split_dir = if direction == "vertical" {
+                SplitDirection::Vertical
+            } else {
+                SplitDirection::Horizontal
+            };
+            let flex_dir = match split_dir {
+                SplitDirection::Horizontal => FlexDirection::Row,
+                SplitDirection::Vertical => FlexDirection::Column,
+            };
+
+            let mut child_nodes = Vec::new();
+            let mut child_splits = Vec::new();
+            let mut child_weights = Vec::new();
+
+            for (i, child_config) in children.iter().enumerate() {
+                let child_split = build_split_from_tree_config(child_config, taffy, panels, next_id);
+                let w = weights.get(i).copied().unwrap_or(1.0);
+
+                // Set weight on child's taffy node
+                let tn = child_split.taffy_node_id();
+                if let Ok(style) = taffy.style(tn) {
+                    let mut style = style.clone();
+                    style.flex_grow = w;
+                    taffy.set_style(tn, style).unwrap();
+                }
+
+                child_nodes.push(tn);
+                child_splits.push(child_split);
+                child_weights.push(w);
+            }
+
+            let branch_node = taffy.new_with_children(
+                branch_container_style(flex_dir),
+                &child_nodes,
+            ).unwrap();
+
+            SplitNode::Branch {
+                direction: split_dir,
+                children: child_splits,
+                weights: child_weights,
+                taffy_node: branch_node,
+            }
+        }
+    }
+}
+
+/// Convert a SplitNode tree to a TreeNodeConfig for config serialization.
+fn split_node_to_tree_config(
+    node: &SplitNode,
+    panel_map: &[(NodeId, PanelId)],
+    panels: &[crate::grid::Panel],
+    terminal_manager: Option<&crate::terminal::TerminalManager>,
+    project_dir: &std::path::Path,
+) -> crate::config::TreeNodeConfig {
+    use crate::config::TreeNodeConfig;
+
+    match node {
+        SplitNode::Leaf { panel_id, .. } => {
+            // Find the panel and create a CapConfig
+            let cap = if let Some(panel) = panels.iter().find(|p| p.id == *panel_id) {
+                crate::config::ProjectConfig::cap_config_from_panel_public(
+                    panel,
+                    terminal_manager,
+                    project_dir,
+                )
+            } else {
+                // Fallback: terminal cap
+                crate::config::project::CapConfig {
+                    cap_type: crate::config::CapType::Terminal,
+                    file: None,
+                    cwd: None,
+                }
+            };
+            TreeNodeConfig::Leaf { cap, weight: 1.0 }
+        }
+        SplitNode::Branch { direction, children, weights, .. } => {
+            let dir = match direction {
+                SplitDirection::Horizontal => "horizontal".to_string(),
+                SplitDirection::Vertical => "vertical".to_string(),
+            };
+            let child_configs: Vec<TreeNodeConfig> = children
+                .iter()
+                .map(|child| split_node_to_tree_config(child, panel_map, panels, terminal_manager, project_dir))
+                .collect();
+            TreeNodeConfig::Branch {
+                direction: dir,
+                children: child_configs,
+                weights: weights.clone(),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
