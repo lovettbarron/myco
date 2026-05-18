@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { Excalidraw, serializeAsJSON } from '@excalidraw/excalidraw';
+import '@excalidraw/excalidraw/index.css';
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingData: { elements: any[]; appState: any } | null = null;
