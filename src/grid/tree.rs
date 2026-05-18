@@ -27,41 +27,88 @@ pub enum SplitNode {
 impl SplitNode {
     /// Returns the taffy NodeId associated with this node.
     pub fn taffy_node_id(&self) -> NodeId {
-        todo!("taffy_node_id not yet implemented")
+        match self {
+            SplitNode::Leaf { taffy_node, .. } => *taffy_node,
+            SplitNode::Branch { taffy_node, .. } => *taffy_node,
+        }
     }
 
     /// Returns true if this node contains a leaf with the given panel ID.
     /// Searches recursively through branches.
-    pub fn contains_panel(&self, _target: PanelId) -> bool {
-        todo!("contains_panel not yet implemented")
+    pub fn contains_panel(&self, target: PanelId) -> bool {
+        match self {
+            SplitNode::Leaf { panel_id, .. } => *panel_id == target,
+            SplitNode::Branch { children, .. } => {
+                children.iter().any(|child| child.contains_panel(target))
+            }
+        }
     }
 
     /// Returns true if this node is a Leaf variant.
     pub fn is_leaf(&self) -> bool {
-        todo!("is_leaf not yet implemented")
+        matches!(self, SplitNode::Leaf { .. })
     }
 
     /// Returns the number of leaf nodes in this subtree.
     /// A Leaf returns 1; a Branch returns the sum of its children's leaf counts.
     pub fn leaf_count(&self) -> usize {
-        todo!("leaf_count not yet implemented")
+        match self {
+            SplitNode::Leaf { .. } => 1,
+            SplitNode::Branch { children, .. } => {
+                children.iter().map(|child| child.leaf_count()).sum()
+            }
+        }
     }
 
     /// Collects all (NodeId, PanelId) pairs from leaf nodes in tree order.
     pub fn collect_leaves(&self) -> Vec<(NodeId, PanelId)> {
-        todo!("collect_leaves not yet implemented")
+        match self {
+            SplitNode::Leaf {
+                panel_id,
+                taffy_node,
+            } => vec![(*taffy_node, *panel_id)],
+            SplitNode::Branch { children, .. } => {
+                children.iter().flat_map(|child| child.collect_leaves()).collect()
+            }
+        }
     }
 
     /// Normalizes weights in a Branch so they sum to 1.0.
     /// No-op on Leaf nodes.
     pub fn normalize_weights(&mut self) {
-        todo!("normalize_weights not yet implemented")
+        if let SplitNode::Branch { weights, .. } = self {
+            let sum: f32 = weights.iter().sum();
+            if sum > 0.0 {
+                for w in weights.iter_mut() {
+                    *w /= sum;
+                }
+            }
+        }
     }
 
     /// Finds the parent Branch of a leaf with the given panel ID.
     /// Returns (parent_branch, child_index) or None if not found or target is root.
-    pub fn find_parent_of(&self, _target: PanelId) -> Option<(&SplitNode, usize)> {
-        todo!("find_parent_of not yet implemented")
+    pub fn find_parent_of(&self, target: PanelId) -> Option<(&SplitNode, usize)> {
+        match self {
+            SplitNode::Leaf { .. } => None,
+            SplitNode::Branch { children, .. } => {
+                // Check if any direct child is the target leaf
+                for (i, child) in children.iter().enumerate() {
+                    if let SplitNode::Leaf { panel_id, .. } = child {
+                        if *panel_id == target {
+                            return Some((self, i));
+                        }
+                    }
+                }
+                // Recurse into branch children
+                for child in children {
+                    if let result @ Some(_) = child.find_parent_of(target) {
+                        return result;
+                    }
+                }
+                None
+            }
+        }
     }
 }
 
