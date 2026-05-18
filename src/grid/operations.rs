@@ -307,9 +307,11 @@ pub fn toggle_fullscreen(grid: &mut GridLayout, panel_id: PanelId) -> bool {
     let root = grid.root();
     let saved_children = grid.tree().children(root).unwrap();
     let saved_column_containers = grid.column_containers().clone();
+    let saved_split_tree = grid.split_tree().clone();
 
     let state = FullscreenState {
         panel_id,
+        saved_split_tree,
         saved_columns,
         saved_rows,
         saved_panels,

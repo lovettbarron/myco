@@ -22,7 +22,7 @@ pollster = "0.4"
 winit = "0.30.13"
 
 # Layout
-taffy = { version = "0.10.1", features = ["grid"] }
+taffy = { version = "0.10.1", features = ["flexbox", "grid"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
