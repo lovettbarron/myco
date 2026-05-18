@@ -8,6 +8,9 @@
 //! Also integrates intervention detection: scans terminal visible text
 //! each poll cycle and sends `UserEvent::InterventionAlert` when patterns
 //! match (D-05).
+//!
+//! Agent discovery: detects AI agent processes running as children of
+//! tracked shell PIDs and sends `UserEvent::AgentUpdate` events (D-08).
 
 pub mod intervention;
 pub mod patterns;
@@ -20,9 +23,14 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tracing::{debug, warn};
 use winit::event_loop::EventLoopProxy;
 
+use crate::agent_monitor::config::AgentConfig;
+use crate::agent_monitor::AgentDiscoveryUpdate;
 use crate::app::UserEvent;
 use crate::grid::panel::PanelId;
 use crate::theme::Theme;
+
+/// Maximum process tree depth to walk when searching for agent ancestors (T-08-03).
+const MAX_ANCESTOR_DEPTH: u8 = 5;
 
 /// Polling interval for resource checks (D-03: every 2 seconds).
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -117,6 +125,7 @@ impl ResourceMonitor {
                 };
                 let mut primed = false;
                 let mut intervention_detector = intervention::InterventionDetector::new();
+                let agent_config = AgentConfig::load();
 
                 loop {
                     // Check for updated state (non-blocking)
@@ -235,6 +244,65 @@ impl ResourceMonitor {
                         intervention_detector.mark_scanned(*panel_id);
                     }
 
+                    // --- Agent discovery (D-08) ---
+                    // Discover AI agent processes running as children of tracked shell PIDs.
+                    // Uses a full process refresh to find child processes of our shell PIDs.
+                    if !current_input.pids.is_empty() {
+                        // Full process refresh to discover children (every 2s is acceptable)
+                        system.refresh_processes_specifics(
+                            ProcessesToUpdate::All,
+                            false, // don't remove dead -- we need the full tree
+                            ProcessRefreshKind::nothing()
+                                .with_cpu()
+                                .with_memory(),
+                        );
+
+                        let shell_pids: Vec<(PanelId, u32)> = current_input.pids.clone();
+                        let mut discoveries: Vec<AgentDiscoveryUpdate> = Vec::new();
+
+                        for (pid, process) in system.processes() {
+                            let process_name = process.name().to_string_lossy().to_string();
+
+                            // Check if this process name matches any known agent
+                            for agent_def in &agent_config.agents {
+                                let matches_agent = agent_def.process_names.iter().any(|pn| {
+                                    process_name == *pn
+                                        || process_name.starts_with(&format!("{}.", pn))
+                                        || process_name.starts_with(&format!("{}-", pn))
+                                });
+
+                                if !matches_agent {
+                                    continue;
+                                }
+
+                                // Check if this process is a descendant of any tracked shell PID
+                                for (panel_id, shell_pid) in &shell_pids {
+                                    if is_descendant_of(&system, *pid, *shell_pid, MAX_ANCESTOR_DEPTH) {
+                                        discoveries.push(AgentDiscoveryUpdate {
+                                            panel_id: *panel_id,
+                                            agent_pid: pid.as_u32(),
+                                            agent_name: agent_def.display_name.clone(),
+                                            agent_def_id: agent_def.id.clone(),
+                                            cpu_percent: process.cpu_usage(),
+                                            memory_bytes: process.memory(),
+                                        });
+                                        break; // Found the parent shell, no need to check others
+                                    }
+                                }
+
+                                break; // Matched an agent def, no need to check others
+                            }
+                        }
+
+                        if !discoveries.is_empty() {
+                            debug!("Agent discovery: found {} agent processes", discoveries.len());
+                            if proxy.send_event(UserEvent::AgentUpdate(discoveries)).is_err() {
+                                debug!("Resource monitor: event loop closed, exiting");
+                                return;
+                            }
+                        }
+                    }
+
                     std::thread::sleep(POLL_INTERVAL);
                 }
             })
@@ -303,6 +371,38 @@ pub fn unfreeze_process_group(child_pid: u32) -> Result<(), std::io::Error> {
     } else {
         Ok(())
     }
+}
+
+/// Check if a process is a descendant of a given ancestor PID.
+///
+/// Walks up the process tree via parent PIDs, up to `max_depth` levels.
+/// Returns true if any ancestor in the chain matches `ancestor_pid`.
+///
+/// Used for agent discovery: agents run as children of the shell process
+/// that was spawned by the terminal panel (T-08-03: depth limited to 5).
+fn is_descendant_of(system: &System, pid: Pid, ancestor_pid: u32, max_depth: u8) -> bool {
+    let mut current = Some(pid);
+    let mut depth = 0;
+
+    while let Some(p) = current {
+        if depth > max_depth {
+            return false;
+        }
+        if let Some(proc_info) = system.process(p) {
+            if let Some(parent) = proc_info.parent() {
+                if parent.as_u32() == ancestor_pid {
+                    return true;
+                }
+                current = Some(parent);
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        depth += 1;
+    }
+    false
 }
 
 /// Determine the resource dot color based on CPU percentage (D-01).
