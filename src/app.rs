@@ -387,28 +387,22 @@ impl App {
 
         match action {
             InputAction::DividerDragMove { delta_pixels } => {
-                if let (Some(grid), Some((div_idx, orientation))) = (
+                if let (Some(grid), Some((div_idx, _orientation))) = (
                     self.grid.as_mut(),
                     self.mouse_state.divider_drag_info(),
                 ) {
-                    let window = self.window.as_ref();
-                    let total_size = match (orientation, window) {
-                        (Orientation::Vertical, Some(w)) => {
-                            w.inner_size().width as f32 / self.scale_factor
+                    if let Some(div) = self.dividers.dividers.get(div_idx) {
+                        let div_clone = div.clone();
+                        let constrained = divider::apply_divider_drag(
+                            grid,
+                            &div_clone,
+                            delta_pixels,
+                        );
+                        // Update the constrained state on the stored divider
+                        if let Some(stored_div) = self.dividers.dividers.get_mut(div_idx) {
+                            stored_div.constrained = constrained;
                         }
-                        (Orientation::Horizontal, Some(w)) => {
-                            w.inner_size().height as f32 / self.scale_factor
-                                - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT
-                        }
-                        _ => return,
-                    };
-                    divider::apply_divider_drag(
-                        grid,
-                        orientation,
-                        div_idx,
-                        delta_pixels,
-                        total_size,
-                    );
+                    }
                     self.recompute_layout();
                 }
             }
@@ -1889,7 +1883,7 @@ impl App {
                 let h = size.height as f32 / self.scale_factor;
                 let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
                 grid.compute(w, grid_height.max(1.0));
-                self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
+                self.dividers = compute_dividers(&grid);
             }
         }
 
@@ -2051,7 +2045,7 @@ impl App {
                 let grid_width = w - sidebar_w;
 
                 grid.compute(grid_width, grid_height.max(1.0));
-                self.dividers = compute_dividers(grid, grid_width, grid_height.max(1.0));
+                self.dividers = compute_dividers(grid);
             }
         }
 
@@ -3453,7 +3447,7 @@ impl ApplicationHandler<UserEvent> for App {
             let h = size.height as f32 / self.scale_factor;
             let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
             grid.compute(w, grid_height.max(1.0));
-            self.dividers = compute_dividers(&grid, w, grid_height.max(1.0));
+            self.dividers = compute_dividers(&grid);
         }
 
         self.panels = panels_from_config;

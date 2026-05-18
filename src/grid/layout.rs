@@ -309,19 +309,60 @@ fn rebuild_taffy_from_split_node(
 
 /// Recursively sync taffy tree children to match the SplitNode tree structure.
 /// For each Branch, ensures the taffy node has the correct children attached.
+///
+/// Uses top-down order (parent before children) to avoid stale parent references:
+/// when a child was moved to a new container, its old parent must release it
+/// before the new parent claims it.
 fn sync_taffy_children_recursive(node: &SplitNode, taffy: &mut TaffyTree<()>) {
     if let SplitNode::Branch { children, taffy_node, .. } = node {
-        // First recurse into children
-        for child in children {
-            sync_taffy_children_recursive(child, taffy);
-        }
-
-        // Set this branch's children in taffy
+        // Set this branch's children in taffy FIRST (top-down)
         let child_taffy_nodes: Vec<NodeId> = children
             .iter()
             .map(|c| c.taffy_node_id())
             .collect();
         let _ = taffy.set_children(*taffy_node, &child_taffy_nodes);
+
+        // Then recurse into children
+        for child in children {
+            sync_taffy_children_recursive(child, taffy);
+        }
+    }
+}
+
+/// Find a Branch node in the split tree by its taffy NodeId.
+///
+/// Uses a two-pass approach to satisfy the borrow checker:
+/// first checks if this node matches, then searches children by index.
+fn find_branch_by_taffy_node(tree: &mut SplitNode, target: NodeId) -> Option<&mut SplitNode> {
+    // Check if this is the target
+    if let SplitNode::Branch { taffy_node, .. } = tree {
+        if *taffy_node == target {
+            return Some(tree);
+        }
+    }
+
+    // Search children by index
+    if let SplitNode::Branch { children, .. } = tree {
+        let child_count = children.len();
+        for i in 0..child_count {
+            if has_branch_with_taffy_node(&children[i], target) {
+                return find_branch_by_taffy_node(&mut children[i], target);
+            }
+        }
+    }
+    None
+}
+
+/// Check if a subtree contains a Branch with the given taffy NodeId.
+fn has_branch_with_taffy_node(tree: &SplitNode, target: NodeId) -> bool {
+    match tree {
+        SplitNode::Branch { taffy_node, children, .. } => {
+            if *taffy_node == target {
+                return true;
+            }
+            children.iter().any(|c| has_branch_with_taffy_node(c, target))
+        }
+        SplitNode::Leaf { .. } => false,
     }
 }
 
@@ -745,6 +786,107 @@ impl GridLayout {
         self.split_tree = rebuilt;
         self.sync_taffy_from_split_tree();
         self.sync_panels_from_tree();
+    }
+
+    /// Apply a weight delta from a divider drag to a specific container.
+    ///
+    /// Finds the Branch in the split tree matching `container_node`, adjusts the
+    /// weights of children at `child_index` and `child_index + 1`, clamps to
+    /// minimum panel sizes, and updates taffy styles.
+    ///
+    /// Returns true if the drag was constrained (a panel hit minimum size).
+    pub fn apply_weight_delta(
+        &mut self,
+        container_node: NodeId,
+        child_index: usize,
+        delta_pixels: f32,
+        orientation: super::divider::Orientation,
+    ) -> bool {
+        use super::divider::{Orientation, PANEL_MIN_WIDTH, PANEL_MIN_HEIGHT};
+
+        // Get the container's rect to determine total size in drag direction
+        let (_, _, container_w, container_h) = self.get_panel_rect(container_node);
+        let total_size = match orientation {
+            Orientation::Vertical => container_w,
+            Orientation::Horizontal => container_h,
+        };
+
+        if total_size <= 0.0 {
+            return false;
+        }
+
+        let min_size = match orientation {
+            Orientation::Vertical => PANEL_MIN_WIDTH,
+            Orientation::Horizontal => PANEL_MIN_HEIGHT,
+        };
+
+        // Find the branch in the split tree and adjust weights
+        let mut constrained = false;
+
+        if let Some(branch) = find_branch_by_taffy_node(&mut self.split_tree, container_node) {
+            if let SplitNode::Branch { children, weights, taffy_node, .. } = branch {
+                if child_index + 1 >= children.len() || child_index >= weights.len() {
+                    return false;
+                }
+
+                let w_left = weights[child_index];
+                let w_right = weights[child_index + 1];
+                let total_weight: f32 = weights.iter().sum();
+
+                if total_weight <= 0.0 {
+                    return false;
+                }
+
+                // Convert delta pixels to weight delta
+                let delta_weight = (delta_pixels / total_size) * total_weight;
+
+                let mut new_left = w_left + delta_weight;
+                let mut new_right = w_right - delta_weight;
+
+                // Compute minimum weight: min_size / total_size * total_weight
+                let min_weight = (min_size / total_size) * total_weight;
+
+                // Clamp
+                if new_left < min_weight {
+                    new_left = min_weight;
+                    new_right = w_left + w_right - min_weight;
+                    constrained = true;
+                }
+                if new_right < min_weight {
+                    new_right = min_weight;
+                    new_left = w_left + w_right - min_weight;
+                    constrained = true;
+                }
+
+                // Validate
+                if new_left <= 0.0 || new_right <= 0.0 {
+                    return true;
+                }
+
+                weights[child_index] = new_left;
+                weights[child_index + 1] = new_right;
+
+                // Update taffy styles for both affected children
+                let left_tn = children[child_index].taffy_node_id();
+                let right_tn = children[child_index + 1].taffy_node_id();
+
+                if let Ok(style) = self.tree.style(left_tn) {
+                    let mut style = style.clone();
+                    style.flex_grow = new_left;
+                    self.tree.set_style(left_tn, style).unwrap();
+                }
+                if let Ok(style) = self.tree.style(right_tn) {
+                    let mut style = style.clone();
+                    style.flex_grow = new_right;
+                    self.tree.set_style(right_tn, style).unwrap();
+                }
+
+                // Mark the container dirty for relayout
+                let _ = self.tree.mark_dirty(*taffy_node);
+            }
+        }
+
+        constrained
     }
 
     /// Swap panel IDs in the split tree (used by swap_panels).
