@@ -195,7 +195,7 @@ Plans:
 - [x] 09-01-PLAN.md -- SplitNode tree data structure and Flexbox engine (replace CSS Grid with recursive N-ary tree, walk-to-root fix)
 
 **Wave 2** *(depends on Wave 1)*
-- [ ] 09-02-PLAN.md -- N-ary tree operations and config migration (same-axis flattening, cross-axis nesting, container collapse, min size rejection, v1->v2 config migration)
+- [x] 09-02-PLAN.md -- N-ary tree operations and config migration (same-axis flattening, cross-axis nesting, container collapse, min size rejection, v1->v2 config migration)
 
 **Wave 3** *(depends on Waves 1+2)*
 - [ ] 09-03-PLAN.md -- Tree-walk dividers and app integration (nested divider computation, container-local drag, constrained warning, split toast, config loading update)
