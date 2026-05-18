@@ -1627,6 +1627,28 @@ impl App {
                 }
                 self.toast_manager.dismiss(toast_id);
             }
+            InputAction::OpenAgentMonitor => {
+                // Singleton behavior: focus existing AgentMonitor panel, or create one
+                if let Some(existing) = self.panels.iter().find(|p| p.panel_type == PanelType::AgentMonitor) {
+                    let existing_id = existing.id;
+                    self.focused_panel = Some(existing_id);
+                } else {
+                    // Create new AgentMonitor panel (same pattern as CreateTerminal)
+                    if let Some(focused_id) = self.focused_panel {
+                        if let Some(grid) = self.grid.as_mut() {
+                            if let Some(new_id) =
+                                operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
+                            {
+                                let panel = Panel::new_agent_monitor(new_id);
+                                self.panels.push(panel);
+                                self.focused_panel = Some(new_id);
+                                self.recompute_layout();
+                                self.auto_save.mark_dirty();
+                            }
+                        }
+                    }
+                }
+            }
             InputAction::Quit => {
                 // Handled in window_event before reaching process_action.
                 // This arm exists only for exhaustive match coverage.
