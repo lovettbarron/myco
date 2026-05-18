@@ -148,6 +148,31 @@ fn is_safe_relative_path(path: &str) -> bool {
     true
 }
 
+/// Convert a v1 column-based layout to a v2 tree-based layout.
+fn migrate_v1_to_v2(_layout: &super::project::LayoutConfig) -> super::project::TreeLayoutConfig {
+    // Stub: returns empty tree (tests will fail)
+    super::project::TreeLayoutConfig {
+        tree: super::project::TreeNodeConfig::Leaf {
+            cap: super::project::CapConfig {
+                cap_type: super::project::CapType::Terminal,
+                file: None,
+                cwd: None,
+            },
+            weight: 1.0,
+        },
+    }
+}
+
+/// Validate a tree config recursively.
+///
+/// Checks:
+/// - Depth does not exceed 10 levels (DoS protection)
+/// - All file/cwd paths are safe relative paths (T-09-04)
+pub fn validate_tree_config(_tree: &super::project::TreeNodeConfig, _depth: usize) -> bool {
+    // Stub: always returns true (tests will fail for reject cases)
+    true
+}
+
 /// Auto-save state machine with debounce timer.
 ///
 /// Tracks when the layout was last modified and whether enough time
@@ -215,6 +240,7 @@ mod tests {
                     cwd: Some(".".to_string()),
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
 
@@ -243,6 +269,7 @@ mod tests {
                     cwd: None,
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
 
@@ -338,6 +365,7 @@ mod tests {
                     }),
                 ],
             },
+            tree_layout: None,
             theme: None,
         };
         assert!(validate_config(&config));
@@ -358,6 +386,7 @@ mod tests {
                     cwd: None,
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
         assert!(!validate_config(&config));
@@ -378,6 +407,7 @@ mod tests {
                     cwd: None,
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
         assert!(!validate_config(&config));
@@ -398,6 +428,7 @@ mod tests {
                     cwd: Some("../secret".to_string()),
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
         assert!(!validate_config(&config));
@@ -419,6 +450,7 @@ mod tests {
                     cwd: None,
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
 
@@ -430,5 +462,160 @@ mod tests {
         // .myco directory and config file should now exist
         assert!(dir.path().join(".myco").exists());
         assert!(dir.path().join(".myco").join("config.json").exists());
+    }
+
+    // =========================================================================
+    // Migration and tree validation tests (Task 2)
+    // =========================================================================
+
+    #[test]
+    fn test_load_v1_config_auto_migrates() {
+        // Save a v1 config (no tree_layout), load it, verify migration
+        let dir = tempfile::tempdir().unwrap();
+        let v1_json = r#"{
+            "version": 1,
+            "metadata": { "name": "old-project" },
+            "layout": {
+                "columns": [
+                    { "type": "terminal", "cwd": "." },
+                    { "type": "markdown", "file": "README.md" }
+                ]
+            }
+        }"#;
+
+        let myco_dir = dir.path().join(".myco");
+        fs::create_dir_all(&myco_dir).unwrap();
+        fs::write(myco_dir.join("config.json"), v1_json).unwrap();
+
+        let config = load_project_config(dir.path());
+        assert!(config.is_some(), "V1 config should load");
+        let config = config.unwrap();
+
+        // Should be auto-migrated to version 2
+        assert_eq!(config.version, 2, "Version should be upgraded to 2");
+        assert!(config.tree_layout.is_some(), "tree_layout should be populated after migration");
+
+        let tree = config.tree_layout.unwrap();
+        match &tree.tree {
+            TreeNodeConfig::Branch { direction, children, .. } => {
+                assert_eq!(direction, "horizontal");
+                assert_eq!(children.len(), 2);
+            }
+            TreeNodeConfig::Leaf { .. } => {
+                panic!("Expected Branch for 2-column migration");
+            }
+        }
+    }
+
+    #[test]
+    fn test_load_v2_config_direct() {
+        // A v2 config with tree_layout should deserialize directly
+        let dir = tempfile::tempdir().unwrap();
+        let v2_json = r#"{
+            "version": 2,
+            "metadata": { "name": "new-project" },
+            "layout": { "columns": [] },
+            "tree_layout": {
+                "tree": {
+                    "node_type": "leaf",
+                    "cap": { "type": "terminal" },
+                    "weight": 1.0
+                }
+            }
+        }"#;
+
+        let myco_dir = dir.path().join(".myco");
+        fs::create_dir_all(&myco_dir).unwrap();
+        fs::write(myco_dir.join("config.json"), v2_json).unwrap();
+
+        let config = load_project_config(dir.path());
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.version, 2);
+        assert!(config.tree_layout.is_some());
+    }
+
+    #[test]
+    fn test_validate_tree_config_safe_paths() {
+        let tree = TreeNodeConfig::Leaf {
+            cap: CapConfig {
+                cap_type: CapType::Terminal,
+                file: Some("src/main.rs".to_string()),
+                cwd: Some(".".to_string()),
+            },
+            weight: 1.0,
+        };
+        assert!(validate_tree_config(&tree, 0));
+    }
+
+    #[test]
+    fn test_validate_tree_config_rejects_traversal() {
+        let tree = TreeNodeConfig::Branch {
+            direction: "horizontal".to_string(),
+            children: vec![
+                TreeNodeConfig::Leaf {
+                    cap: CapConfig {
+                        cap_type: CapType::Markdown,
+                        file: Some("../../etc/passwd".to_string()),
+                        cwd: None,
+                    },
+                    weight: 1.0,
+                },
+            ],
+            weights: vec![1.0],
+        };
+        assert!(!validate_tree_config(&tree, 0));
+    }
+
+    #[test]
+    fn test_validate_tree_config_rejects_deep_tree() {
+        // Build a tree 11 levels deep (exceeds max depth of 10)
+        let mut tree = TreeNodeConfig::Leaf {
+            cap: CapConfig {
+                cap_type: CapType::Terminal,
+                file: None,
+                cwd: None,
+            },
+            weight: 1.0,
+        };
+        for _ in 0..11 {
+            tree = TreeNodeConfig::Branch {
+                direction: "horizontal".to_string(),
+                children: vec![tree],
+                weights: vec![1.0],
+            };
+        }
+        assert!(!validate_tree_config(&tree, 0), "Tree deeper than 10 levels should be rejected");
+    }
+
+    #[test]
+    fn test_save_writes_v2_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = ProjectConfig {
+            version: 2,
+            metadata: ProjectMetadata {
+                name: "v2-test".to_string(),
+                description: None,
+            },
+            layout: LayoutConfig { columns: vec![] },
+            tree_layout: Some(TreeLayoutConfig {
+                tree: TreeNodeConfig::Leaf {
+                    cap: CapConfig {
+                        cap_type: CapType::Terminal,
+                        file: None,
+                        cwd: None,
+                    },
+                    weight: 1.0,
+                },
+            }),
+            theme: None,
+        };
+
+        save_project_config(dir.path(), &config);
+
+        // Read back raw JSON and verify format
+        let raw = fs::read_to_string(dir.path().join(".myco/config.json")).unwrap();
+        assert!(raw.contains("\"tree_layout\""), "Should contain tree_layout key");
+        assert!(raw.contains("\"version\": 2"), "Should have version 2");
     }
 }

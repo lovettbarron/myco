@@ -12,8 +12,12 @@ pub struct ProjectConfig {
     pub version: u32,
     /// Project metadata (name, description).
     pub metadata: ProjectMetadata,
-    /// Grid layout configuration.
+    /// Grid layout configuration (v1 columns format).
     pub layout: LayoutConfig,
+    /// Tree-based layout configuration (v2 tree format).
+    /// Present when version >= 2. Used instead of layout.columns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_layout: Option<TreeLayoutConfig>,
     /// Active theme name (falls back to global preference if None).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
@@ -155,6 +159,7 @@ impl ProjectConfig {
                 description: None,
             },
             layout: LayoutConfig { columns },
+            tree_layout: None,
             theme: theme_name.map(|s| s.to_string()),
         }
     }
@@ -222,6 +227,35 @@ fn make_relative(path: &std::path::Path, project_dir: &std::path::Path) -> Strin
         .unwrap_or_else(|_| path.to_string_lossy().to_string())
 }
 
+/// Tree-based layout config (version 2). Replaces LayoutConfig for new configs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeLayoutConfig {
+    pub tree: TreeNodeConfig,
+}
+
+/// A node in the recursive layout tree config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "node_type")]
+pub enum TreeNodeConfig {
+    #[serde(rename = "leaf")]
+    Leaf {
+        cap: CapConfig,
+        #[serde(default = "default_weight")]
+        weight: f32,
+    },
+    #[serde(rename = "branch")]
+    Branch {
+        direction: String, // "horizontal" or "vertical"
+        children: Vec<TreeNodeConfig>,
+        #[serde(default)]
+        weights: Vec<f32>,
+    },
+}
+
+fn default_weight() -> f32 {
+    1.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +282,7 @@ mod tests {
                     }),
                 ],
             },
+            tree_layout: None,
             theme: Some("Dracula".to_string()),
         };
 
@@ -366,6 +401,7 @@ mod tests {
                     cwd: None,
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
 
@@ -407,11 +443,139 @@ mod tests {
                     cwd: None,
                 })],
             },
+            tree_layout: None,
             theme: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("description"));
         assert!(!json.contains("theme"));
+    }
+
+    // =========================================================================
+    // TreeNodeConfig serde tests
+    // =========================================================================
+
+    #[test]
+    fn test_tree_node_config_leaf_serde() {
+        let leaf = TreeNodeConfig::Leaf {
+            cap: CapConfig {
+                cap_type: CapType::Terminal,
+                file: None,
+                cwd: Some(".".to_string()),
+            },
+            weight: 1.0,
+        };
+
+        let json = serde_json::to_string_pretty(&leaf).unwrap();
+        assert!(json.contains("\"node_type\": \"leaf\""));
+        assert!(json.contains("\"weight\": 1.0"));
+
+        let roundtrip: TreeNodeConfig = serde_json::from_str(&json).unwrap();
+        match roundtrip {
+            TreeNodeConfig::Leaf { cap, weight } => {
+                assert_eq!(cap.cap_type, CapType::Terminal);
+                assert_eq!(weight, 1.0);
+            }
+            _ => panic!("Expected Leaf"),
+        }
+    }
+
+    #[test]
+    fn test_tree_node_config_branch_serde() {
+        let branch = TreeNodeConfig::Branch {
+            direction: "horizontal".to_string(),
+            children: vec![
+                TreeNodeConfig::Leaf {
+                    cap: CapConfig {
+                        cap_type: CapType::Terminal,
+                        file: None,
+                        cwd: None,
+                    },
+                    weight: 0.5,
+                },
+                TreeNodeConfig::Leaf {
+                    cap: CapConfig {
+                        cap_type: CapType::Markdown,
+                        file: Some("README.md".to_string()),
+                        cwd: None,
+                    },
+                    weight: 0.5,
+                },
+            ],
+            weights: vec![0.5, 0.5],
+        };
+
+        let json = serde_json::to_string_pretty(&branch).unwrap();
+        assert!(json.contains("\"node_type\": \"branch\""));
+        assert!(json.contains("\"direction\": \"horizontal\""));
+
+        let roundtrip: TreeNodeConfig = serde_json::from_str(&json).unwrap();
+        match roundtrip {
+            TreeNodeConfig::Branch { direction, children, weights } => {
+                assert_eq!(direction, "horizontal");
+                assert_eq!(children.len(), 2);
+                assert_eq!(weights.len(), 2);
+            }
+            _ => panic!("Expected Branch"),
+        }
+    }
+
+    #[test]
+    fn test_tree_node_config_nested_serde() {
+        let nested = TreeNodeConfig::Branch {
+            direction: "horizontal".to_string(),
+            children: vec![
+                TreeNodeConfig::Leaf {
+                    cap: CapConfig {
+                        cap_type: CapType::Terminal,
+                        file: None,
+                        cwd: None,
+                    },
+                    weight: 1.0,
+                },
+                TreeNodeConfig::Branch {
+                    direction: "vertical".to_string(),
+                    children: vec![
+                        TreeNodeConfig::Leaf {
+                            cap: CapConfig {
+                                cap_type: CapType::Terminal,
+                                file: None,
+                                cwd: None,
+                            },
+                            weight: 0.5,
+                        },
+                        TreeNodeConfig::Leaf {
+                            cap: CapConfig {
+                                cap_type: CapType::Canvas,
+                                file: Some(".myco/canvas/sketch.tldr".to_string()),
+                                cwd: None,
+                            },
+                            weight: 0.5,
+                        },
+                    ],
+                    weights: vec![0.5, 0.5],
+                },
+            ],
+            weights: vec![0.5, 0.5],
+        };
+
+        let json = serde_json::to_string_pretty(&nested).unwrap();
+        let roundtrip: TreeNodeConfig = serde_json::from_str(&json).unwrap();
+
+        match roundtrip {
+            TreeNodeConfig::Branch { children, .. } => {
+                assert_eq!(children.len(), 2);
+                assert!(matches!(&children[0], TreeNodeConfig::Leaf { .. }));
+                match &children[1] {
+                    TreeNodeConfig::Branch { children: inner, direction, .. } => {
+                        assert_eq!(direction, "vertical");
+                        assert_eq!(inner.len(), 2);
+                    }
+                    _ => panic!("Expected nested Branch"),
+                }
+            }
+            _ => panic!("Expected Branch"),
+        }
     }
 }
