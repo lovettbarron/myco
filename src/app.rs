@@ -239,6 +239,8 @@ pub struct App {
     context_menu_target: Option<std::path::PathBuf>,
     /// Panel ID targeted by the panel header context menu (freeze/unfreeze).
     context_menu_panel_id: Option<PanelId>,
+    /// Agent row index targeted by the agent monitor context menu.
+    context_menu_agent_row: Option<usize>,
     /// Accumulated sub-line pixel scroll delta for smooth trackpad scrolling.
     scroll_pixel_accumulator: f64,
     /// Top stats bar (panel count, uptime).
@@ -312,6 +314,7 @@ impl App {
             menu_state: None,
             context_menu_target: None,
             context_menu_panel_id: None,
+            context_menu_agent_row: None,
             scroll_pixel_accumulator: 0.0,
             stats_bar: StatsBar::new(),
             bottom_bar: None,
@@ -377,7 +380,8 @@ impl App {
             | InputAction::MarkdownScroll { panel_id, .. }
             | InputAction::CanvasZoom { panel_id, .. }
             | InputAction::CanvasIpcMessage { panel_id, .. }
-            | InputAction::AgentMonitorScroll { panel_id, .. } => {
+            | InputAction::AgentMonitorScroll { panel_id, .. }
+            | InputAction::AgentMonitorClick { panel_id, .. } => {
                 if self.panels.iter().any(|p| p.id == *panel_id && p.frozen) {
                     return; // Block input to frozen panels
                 }
@@ -1242,6 +1246,29 @@ impl App {
                         // Alert log region
                         self.agent_monitor_state.alert_scroll_offset =
                             (self.agent_monitor_state.alert_scroll_offset + delta).max(0.0);
+                    }
+                }
+            }
+            InputAction::AgentMonitorClick { panel_id: _, x, y, is_right_click } => {
+                // Dispatch click to agent monitor state for hit-testing
+                let bounds = self.panels.iter()
+                    .find(|p| p.panel_type == PanelType::AgentMonitor)
+                    .and_then(|p| self.panel_content_bounds(p.id));
+                if let Some(bounds) = bounds {
+                    let action = self.agent_monitor_state.handle_click(x, y, bounds, is_right_click);
+                    match action {
+                        crate::agent_monitor::AgentMonitorAction::FocusTerminal(target_panel_id) => {
+                            self.focused_panel = Some(target_panel_id);
+                        }
+                        crate::agent_monitor::AgentMonitorAction::ExpandRow(_)
+                        | crate::agent_monitor::AgentMonitorAction::CollapseRow(_) => {
+                            // State already mutated in handle_click, just redraw
+                        }
+                        crate::agent_monitor::AgentMonitorAction::ShowContextMenu { row_index, screen_x: _, screen_y: _ } => {
+                            // Store the row index for context menu result dispatch (menu shown in Task 3)
+                            self.context_menu_agent_row = Some(row_index);
+                        }
+                        _ => {} // None, others
                     }
                 }
             }

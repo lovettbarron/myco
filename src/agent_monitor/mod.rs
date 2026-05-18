@@ -115,6 +115,8 @@ pub enum AgentMonitorAction {
     ExpandRow(usize),
     /// Collapse the row at index.
     CollapseRow(usize),
+    /// Show context menu at the given screen coordinates for the agent at row_index.
+    ShowContextMenu { row_index: usize, screen_x: f32, screen_y: f32 },
     /// No action.
     None,
 }
@@ -291,6 +293,92 @@ impl AgentMonitorState {
                 }
             }
         }
+    }
+
+    /// Handle a click on the agent monitor panel.
+    ///
+    /// Hit-tests against computed row positions to determine the action:
+    /// - Right-click: show context menu for the row
+    /// - Click on chevron area (left 24px): expand/collapse detail section
+    /// - Click on row body: focus the source terminal panel
+    ///
+    /// Returns `AgentMonitorAction::None` if click is outside any row.
+    pub fn handle_click(
+        &mut self,
+        x: f32,
+        y: f32,
+        bounds: (f32, f32, f32, f32),
+        is_right_click: bool,
+    ) -> AgentMonitorAction {
+        let (bx, by, _bw, bh) = bounds;
+
+        // Constants matching renderer.rs layout
+        const HEADER_HEIGHT: f32 = 28.0;
+        const ROW_HEIGHT: f32 = 32.0;
+        const DETAIL_ROW_HEIGHT: f32 = 24.0;
+        const DETAIL_ROWS: f32 = 3.0;
+        const DETAIL_PADDING: f32 = 16.0;
+        const CHEVRON_WIDTH: f32 = 24.0;
+
+        // Agent list occupies top 60% of panel
+        let list_height = bh * 0.6;
+        let list_top = by + HEADER_HEIGHT;
+        let list_bottom = by + list_height;
+
+        // Check if click is in the agent list area
+        if y < list_top || y > list_bottom {
+            return AgentMonitorAction::None;
+        }
+
+        // Calculate which row was clicked, accounting for scroll offset and expanded rows
+        let content_y = y - list_top + self.agent_scroll_offset;
+
+        // Walk through rows to find which one was clicked (some may be expanded)
+        let mut cumulative_y: f32 = 0.0;
+        for (idx, session) in self.sessions.iter().enumerate() {
+            let row_end = cumulative_y + ROW_HEIGHT;
+            let expanded_height = if session.expanded {
+                DETAIL_ROW_HEIGHT * DETAIL_ROWS + DETAIL_PADDING
+            } else {
+                0.0
+            };
+            let total_row_end = row_end + expanded_height;
+
+            if content_y >= cumulative_y && content_y < total_row_end {
+                if is_right_click {
+                    return AgentMonitorAction::ShowContextMenu {
+                        row_index: idx,
+                        screen_x: x,
+                        screen_y: y,
+                    };
+                }
+
+                // Check if click is in the compact row part (not expanded detail)
+                if content_y < row_end {
+                    // Check if click is on chevron area (left CHEVRON_WIDTH px of row)
+                    let chevron_x_end = bx + CHEVRON_WIDTH;
+                    if x < chevron_x_end {
+                        if session.expanded {
+                            self.sessions[idx].expanded = false;
+                            return AgentMonitorAction::CollapseRow(idx);
+                        } else {
+                            self.sessions[idx].expanded = true;
+                            return AgentMonitorAction::ExpandRow(idx);
+                        }
+                    }
+
+                    // Click on the row body = focus terminal
+                    return AgentMonitorAction::FocusTerminal(session.panel_id);
+                }
+
+                // Click is in expanded detail section -- no focus switch
+                return AgentMonitorAction::None;
+            }
+
+            cumulative_y = total_row_end;
+        }
+
+        AgentMonitorAction::None
     }
 
     /// Count active agent sessions (Running, Waiting, or Frozen status).
