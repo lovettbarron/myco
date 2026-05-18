@@ -115,6 +115,8 @@ pub enum AgentMonitorAction {
     ExpandRow(usize),
     /// Collapse the row at index.
     CollapseRow(usize),
+    /// Show context menu at the given screen coordinates for the agent at row_index.
+    ShowContextMenu { row_index: usize, screen_x: f32, screen_y: f32 },
     /// No action.
     None,
 }
@@ -293,6 +295,92 @@ impl AgentMonitorState {
         }
     }
 
+    /// Handle a click on the agent monitor panel.
+    ///
+    /// Hit-tests against computed row positions to determine the action:
+    /// - Right-click: show context menu for the row
+    /// - Click on chevron area (left 24px): expand/collapse detail section
+    /// - Click on row body: focus the source terminal panel
+    ///
+    /// Returns `AgentMonitorAction::None` if click is outside any row.
+    pub fn handle_click(
+        &mut self,
+        x: f32,
+        y: f32,
+        bounds: (f32, f32, f32, f32),
+        is_right_click: bool,
+    ) -> AgentMonitorAction {
+        let (bx, by, _bw, bh) = bounds;
+
+        // Constants matching renderer.rs layout
+        const HEADER_HEIGHT: f32 = 28.0;
+        const ROW_HEIGHT: f32 = 32.0;
+        const DETAIL_ROW_HEIGHT: f32 = 24.0;
+        const DETAIL_ROWS: f32 = 3.0;
+        const DETAIL_PADDING: f32 = 16.0;
+        const CHEVRON_WIDTH: f32 = 24.0;
+
+        // Agent list occupies top 60% of panel
+        let list_height = bh * 0.6;
+        let list_top = by + HEADER_HEIGHT;
+        let list_bottom = by + list_height;
+
+        // Check if click is in the agent list area
+        if y < list_top || y > list_bottom {
+            return AgentMonitorAction::None;
+        }
+
+        // Calculate which row was clicked, accounting for scroll offset and expanded rows
+        let content_y = y - list_top + self.agent_scroll_offset;
+
+        // Walk through rows to find which one was clicked (some may be expanded)
+        let mut cumulative_y: f32 = 0.0;
+        for (idx, session) in self.sessions.iter().enumerate() {
+            let row_end = cumulative_y + ROW_HEIGHT;
+            let expanded_height = if session.expanded {
+                DETAIL_ROW_HEIGHT * DETAIL_ROWS + DETAIL_PADDING
+            } else {
+                0.0
+            };
+            let total_row_end = row_end + expanded_height;
+
+            if content_y >= cumulative_y && content_y < total_row_end {
+                if is_right_click {
+                    return AgentMonitorAction::ShowContextMenu {
+                        row_index: idx,
+                        screen_x: x,
+                        screen_y: y,
+                    };
+                }
+
+                // Check if click is in the compact row part (not expanded detail)
+                if content_y < row_end {
+                    // Check if click is on chevron area (left CHEVRON_WIDTH px of row)
+                    let chevron_x_end = bx + CHEVRON_WIDTH;
+                    if x < chevron_x_end {
+                        if session.expanded {
+                            self.sessions[idx].expanded = false;
+                            return AgentMonitorAction::CollapseRow(idx);
+                        } else {
+                            self.sessions[idx].expanded = true;
+                            return AgentMonitorAction::ExpandRow(idx);
+                        }
+                    }
+
+                    // Click on the row body = focus terminal
+                    return AgentMonitorAction::FocusTerminal(session.panel_id);
+                }
+
+                // Click is in expanded detail section -- no focus switch
+                return AgentMonitorAction::None;
+            }
+
+            cumulative_y = total_row_end;
+        }
+
+        AgentMonitorAction::None
+    }
+
     /// Count active agent sessions (Running, Waiting, or Frozen status).
     pub fn active_count(&self) -> usize {
         self.sessions
@@ -317,6 +405,57 @@ pub struct AgentDiscoveryUpdate {
     pub cpu_percent: f32,
     /// Current memory usage in bytes.
     pub memory_bytes: u64,
+}
+
+/// Token update extracted from terminal text.
+#[derive(Debug, Clone, Default)]
+pub struct TokenUpdate {
+    pub total_tokens: Option<u64>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
+}
+
+/// Parse token usage from terminal text using the given patterns.
+///
+/// Searches for each configured prefix in the text and extracts the numeric
+/// value following it. Returns None if no token patterns match at all.
+///
+/// This is a convenience wrapper around `parse_token_after_prefix()` and
+/// `parse_cost_after_prefix()` that returns a structured update.
+pub fn parse_tokens_from_text(text: &str, patterns: &config::TokenPatterns) -> Option<TokenUpdate> {
+    let mut update = TokenUpdate::default();
+    let mut found = false;
+
+    if let Some(ref prefix) = patterns.total_prefix {
+        if let Some(val) = parse_token_after_prefix(text, prefix) {
+            update.total_tokens = Some(val);
+            found = true;
+        }
+    }
+
+    if let Some(ref prefix) = patterns.input_prefix {
+        if let Some(val) = parse_token_after_prefix(text, prefix) {
+            update.input_tokens = Some(val);
+            found = true;
+        }
+    }
+
+    if let Some(ref prefix) = patterns.output_prefix {
+        if let Some(val) = parse_token_after_prefix(text, prefix) {
+            update.output_tokens = Some(val);
+            found = true;
+        }
+    }
+
+    if let Some(ref prefix) = patterns.cost_prefix {
+        if let Some(val) = parse_cost_after_prefix(text, prefix) {
+            update.cost_usd = Some(val);
+            found = true;
+        }
+    }
+
+    if found { Some(update) } else { None }
 }
 
 /// Parse a token count after a prefix string in terminal text.
@@ -626,5 +765,130 @@ mod tests {
 
         // Agent 1 (25% CPU) = Running, Agent 2 (0.1% CPU) = Idle
         assert_eq!(state.active_count(), 1);
+    }
+
+    #[test]
+    fn test_parse_tokens_from_text_all_fields() {
+        let patterns = config::TokenPatterns {
+            total_prefix: Some("Total tokens:".to_string()),
+            input_prefix: Some("Input tokens:".to_string()),
+            output_prefix: Some("Output tokens:".to_string()),
+            cost_prefix: Some("Cost:".to_string()),
+        };
+        let text = "Total tokens: 42,195\nInput tokens: 30,000\nOutput tokens: 12,195\nCost: $1.23";
+        let update = parse_tokens_from_text(text, &patterns).expect("should parse");
+        assert_eq!(update.total_tokens, Some(42195));
+        assert_eq!(update.input_tokens, Some(30000));
+        assert_eq!(update.output_tokens, Some(12195));
+        assert!((update.cost_usd.unwrap() - 1.23).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_tokens_from_text_partial_match() {
+        let patterns = config::TokenPatterns {
+            total_prefix: Some("Total tokens:".to_string()),
+            input_prefix: None,
+            output_prefix: None,
+            cost_prefix: None,
+        };
+        let text = "Total tokens: 1000";
+        let update = parse_tokens_from_text(text, &patterns).expect("should parse");
+        assert_eq!(update.total_tokens, Some(1000));
+        assert_eq!(update.input_tokens, None);
+    }
+
+    #[test]
+    fn test_parse_tokens_from_text_no_match() {
+        let patterns = config::TokenPatterns {
+            total_prefix: Some("Total tokens:".to_string()),
+            input_prefix: None,
+            output_prefix: None,
+            cost_prefix: None,
+        };
+        let text = "no matching content here";
+        assert!(parse_tokens_from_text(text, &patterns).is_none());
+    }
+
+    #[test]
+    fn test_handle_click_focus_terminal() {
+        let mut state = AgentMonitorState::new();
+        let discoveries = vec![AgentDiscoveryUpdate {
+            panel_id: PanelId(5),
+            agent_pid: 1234,
+            agent_name: "Claude Code".to_string(),
+            agent_def_id: "claude_code".to_string(),
+            cpu_percent: 25.0,
+            memory_bytes: 100_000_000,
+        }];
+        state.update_from_discovery(&discoveries);
+
+        // Click on row body (past chevron area, within first row)
+        // bounds = (x=0, y=0, w=400, h=300)
+        let action = state.handle_click(30.0, 40.0, (0.0, 0.0, 400.0, 300.0), false);
+        match action {
+            AgentMonitorAction::FocusTerminal(pid) => assert_eq!(pid, PanelId(5)),
+            other => panic!("Expected FocusTerminal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_handle_click_expand_collapse() {
+        let mut state = AgentMonitorState::new();
+        let discoveries = vec![AgentDiscoveryUpdate {
+            panel_id: PanelId(5),
+            agent_pid: 1234,
+            agent_name: "Claude Code".to_string(),
+            agent_def_id: "claude_code".to_string(),
+            cpu_percent: 25.0,
+            memory_bytes: 100_000_000,
+        }];
+        state.update_from_discovery(&discoveries);
+
+        // Click on chevron area (x < 24)
+        let action = state.handle_click(10.0, 40.0, (0.0, 0.0, 400.0, 300.0), false);
+        match action {
+            AgentMonitorAction::ExpandRow(0) => {}
+            other => panic!("Expected ExpandRow(0), got {:?}", other),
+        }
+        assert!(state.sessions[0].expanded);
+
+        // Click again to collapse
+        let action = state.handle_click(10.0, 40.0, (0.0, 0.0, 400.0, 300.0), false);
+        match action {
+            AgentMonitorAction::CollapseRow(0) => {}
+            other => panic!("Expected CollapseRow(0), got {:?}", other),
+        }
+        assert!(!state.sessions[0].expanded);
+    }
+
+    #[test]
+    fn test_handle_click_right_click_context_menu() {
+        let mut state = AgentMonitorState::new();
+        let discoveries = vec![AgentDiscoveryUpdate {
+            panel_id: PanelId(5),
+            agent_pid: 1234,
+            agent_name: "Claude Code".to_string(),
+            agent_def_id: "claude_code".to_string(),
+            cpu_percent: 25.0,
+            memory_bytes: 100_000_000,
+        }];
+        state.update_from_discovery(&discoveries);
+
+        let action = state.handle_click(100.0, 40.0, (0.0, 0.0, 400.0, 300.0), true);
+        match action {
+            AgentMonitorAction::ShowContextMenu { row_index, .. } => assert_eq!(row_index, 0),
+            other => panic!("Expected ShowContextMenu, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_handle_click_outside_rows() {
+        let mut state = AgentMonitorState::new();
+        // No sessions, any click should return None
+        let action = state.handle_click(100.0, 40.0, (0.0, 0.0, 400.0, 300.0), false);
+        match action {
+            AgentMonitorAction::None => {}
+            other => panic!("Expected None, got {:?}", other),
+        }
     }
 }

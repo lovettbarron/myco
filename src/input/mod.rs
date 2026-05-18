@@ -96,6 +96,8 @@ pub enum InputAction {
     CanvasZoom { panel_id: PanelId, delta: f32 },
     /// Scroll agent monitor panel (agent list or alert log depending on cursor position).
     AgentMonitorScroll { panel_id: PanelId, delta: f32, cursor_y: f32 },
+    /// Click on agent monitor panel body (left or right click).
+    AgentMonitorClick { panel_id: PanelId, x: f32, y: f32, is_right_click: bool },
     /// Markdown file changed on disk (from watcher).
     MarkdownFileChanged { path: PathBuf },
     /// Toggle sidebar visibility.
@@ -142,6 +144,8 @@ pub enum InputAction {
     DismissToast { toast_id: u64 },
     /// Click action on a toast (e.g. "Focus Panel").
     ToastAction { toast_id: u64 },
+    /// Open or focus the Agent Monitor panel (Cmd+Shift+A, singleton).
+    OpenAgentMonitor,
     /// Quit the application (Cmd+Q).
     Quit,
 }
@@ -167,6 +171,7 @@ pub fn action_from_id(action_id: &str, panel_id: PanelId) -> Option<InputAction>
         "font_size_up" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: 1.0 }),
         "font_size_down" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: -1.0 }),
         "toggle_fullscreen" => Some(InputAction::PanelToggleFullscreen { panel_id }),
+        "open_agent_monitor" => Some(InputAction::OpenAgentMonitor),
         "quit" => Some(InputAction::Quit),
         _ => None,
     }
