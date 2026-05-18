@@ -1839,6 +1839,9 @@ impl App {
                                     Panel::new_terminal(pid)
                                 }
                             }
+                            crate::config::CapType::AgentMonitor => {
+                                Panel::new_agent_monitor(pid)
+                            }
                         };
                         panels.push(panel);
                     }
@@ -3378,6 +3381,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 } else {
                                     Panel::new_terminal(pid)
                                 }
+                            }
+                            crate::config::CapType::AgentMonitor => {
+                                Panel::new_agent_monitor(pid)
                             }
                         };
                         panels.push(panel);

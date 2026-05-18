@@ -9,6 +9,7 @@
 //! renderer (Plan 02) consumes `AgentMonitorState` to display live data.
 
 pub mod config;
+pub mod renderer;
 
 use std::time::{Duration, Instant};
 
