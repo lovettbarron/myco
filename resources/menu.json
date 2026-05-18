@@ -12,8 +12,14 @@
     {
       "title": "File",
       "items": [
-        { "label": "New Terminal", "action": "create_terminal", "key": "t" },
-        { "label": "New Canvas", "action": "create_canvas", "key": "t", "modifiers": "cmd+shift" },
+        {
+          "label": "Add Cap",
+          "items": [
+            { "label": "Terminal", "action": "create_terminal", "key": "t" },
+            { "label": "Canvas", "action": "create_canvas", "key": "t", "modifiers": "cmd+shift" },
+            { "label": "Agent Monitor", "action": "create_agent_monitor" }
+          ]
+        },
         { "separator": true },
         { "label": "Initialize Project", "action": "init_project" },
         { "separator": true },

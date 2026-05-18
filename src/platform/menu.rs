@@ -76,6 +76,8 @@ pub struct MenuItemDef {
     pub separator: bool,
     #[serde(default)]
     pub toggle: Option<ToggleDef>,
+    #[serde(default)]
+    pub items: Vec<MenuItemDef>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -131,53 +133,15 @@ pub fn setup_menu_bar(proxy: EventLoopProxy<UserEvent>) -> MenuState {
             &NSString::from_str(&menu_def.title),
         );
 
-        for item_def in &menu_def.items {
-            if item_def.separator {
-                submenu.addItem(&NSMenuItem::separatorItem(mtm));
-                continue;
-            }
-
-            let tag = next_tag;
-            next_tag += 1;
-
-            let (action_sel, key_str) = match item_def.action.as_str() {
-                "about" => (Some(sel!(orderFrontStandardAboutPanel:)), ns_string!("")),
-                "quit" => (Some(sel!(terminate:)), &*NSString::from_str(&item_def.key)),
-                "minimize" => (Some(sel!(performMiniaturize:)), &*NSString::from_str(&item_def.key)),
-                "zoom" => (Some(sel!(performZoom:)), ns_string!("")),
-                _ => (Some(sel!(handleMenuAction:)), &*NSString::from_str(&item_def.key)),
-            };
-
-            let ns_item = unsafe {
-                NSMenuItem::initWithTitle_action_keyEquivalent(
-                    NSMenuItem::alloc(mtm),
-                    &NSString::from_str(&item_def.label),
-                    action_sel,
-                    key_str,
-                )
-            };
-
-            ns_item.setTag(tag as isize);
-
-            if matches!(item_def.action.as_str(), "about" | "quit" | "minimize" | "zoom") {
-                // System actions use the responder chain
-            } else {
-                unsafe { ns_item.setTarget(Some(handler.as_ref() as &AnyObject)) };
-            }
-
-            if !item_def.modifiers.is_empty() {
-                let mask = parse_modifiers(&item_def.modifiers);
-                ns_item.setKeyEquivalentModifierMask(mask);
-            }
-
-            action_map.insert(tag, item_def.action.clone());
-
-            if let Some(toggle) = &item_def.toggle {
-                toggles.push(ToggleEntry { tag, def: toggle.clone() });
-            }
-
-            submenu.addItem(&ns_item);
-        }
+        build_menu_items(
+            mtm,
+            &submenu,
+            &menu_def.items,
+            &handler,
+            &mut next_tag,
+            &mut action_map,
+            &mut toggles,
+        );
 
         menu_item.setSubmenu(Some(&submenu));
         menu_bar.addItem(&menu_item);
@@ -190,6 +154,84 @@ pub fn setup_menu_bar(proxy: EventLoopProxy<UserEvent>) -> MenuState {
     });
 
     MenuState { action_map, toggles }
+}
+
+fn build_menu_items(
+    mtm: MainThreadMarker,
+    menu: &NSMenu,
+    items: &[MenuItemDef],
+    handler: &Retained<MenuActionHandler>,
+    next_tag: &mut u32,
+    action_map: &mut HashMap<u32, String>,
+    toggles: &mut Vec<ToggleEntry>,
+) {
+    for item_def in items {
+        if item_def.separator {
+            menu.addItem(&NSMenuItem::separatorItem(mtm));
+            continue;
+        }
+
+        // Submenu item: has nested items and no action
+        if !item_def.items.is_empty() {
+            let sub_item = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(mtm),
+                    &NSString::from_str(&item_def.label),
+                    None,
+                    ns_string!(""),
+                )
+            };
+            let sub_menu = NSMenu::initWithTitle(
+                NSMenu::alloc(mtm),
+                &NSString::from_str(&item_def.label),
+            );
+            build_menu_items(mtm, &sub_menu, &item_def.items, handler, next_tag, action_map, toggles);
+            sub_item.setSubmenu(Some(&sub_menu));
+            menu.addItem(&sub_item);
+            continue;
+        }
+
+        let tag = *next_tag;
+        *next_tag += 1;
+
+        let (action_sel, key_str) = match item_def.action.as_str() {
+            "about" => (Some(sel!(orderFrontStandardAboutPanel:)), ns_string!("")),
+            "quit" => (Some(sel!(terminate:)), &*NSString::from_str(&item_def.key)),
+            "minimize" => (Some(sel!(performMiniaturize:)), &*NSString::from_str(&item_def.key)),
+            "zoom" => (Some(sel!(performZoom:)), ns_string!("")),
+            _ => (Some(sel!(handleMenuAction:)), &*NSString::from_str(&item_def.key)),
+        };
+
+        let ns_item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(&item_def.label),
+                action_sel,
+                key_str,
+            )
+        };
+
+        ns_item.setTag(tag as isize);
+
+        if matches!(item_def.action.as_str(), "about" | "quit" | "minimize" | "zoom") {
+            // System actions use the responder chain
+        } else {
+            unsafe { ns_item.setTarget(Some(handler.as_ref() as &AnyObject)) };
+        }
+
+        if !item_def.modifiers.is_empty() {
+            let mask = parse_modifiers(&item_def.modifiers);
+            ns_item.setKeyEquivalentModifierMask(mask);
+        }
+
+        action_map.insert(tag, item_def.action.clone());
+
+        if let Some(toggle) = &item_def.toggle {
+            toggles.push(ToggleEntry { tag, def: toggle.clone() });
+        }
+
+        menu.addItem(&ns_item);
+    }
 }
 
 pub fn update_toggle_labels(state: &MenuState, app_state: &HashMap<String, bool>) {

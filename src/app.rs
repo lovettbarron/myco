@@ -1911,6 +1911,7 @@ impl App {
         let input_action = match action_name.as_str() {
             "create_terminal" => Some(InputAction::CreateTerminal),
             "create_canvas" => Some(InputAction::CreateCanvas),
+            "create_agent_monitor" => Some(InputAction::OpenAgentMonitor),
             "close_panel" => Some(InputAction::PanelClose { panel_id }),
             "toggle_sidebar" => Some(InputAction::ToggleSidebar),
             "split_horizontal" => Some(InputAction::PanelSplitHorizontal { panel_id }),

@@ -114,7 +114,8 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 260516-gw3 | Add dev-mode performance instrumentation to render hot path | 2026-05-16 | 1ed7bef | [260516-gw3-add-dev-mode-performance-instrumentation](./quick/260516-gw3-add-dev-mode-performance-instrumentation/) |
 | 260516-cls | Column-local vertical split refactor (Cmd+D splits only focused column) | 2026-05-16 | 677ba88 | [20260516-column-local-split](./quick/20260516-column-local-split/) |
-| 260518-sip | Update intervention detection patterns for Claude Code v2.x | 2026-05-18 | pending | [20260518-stale-intervention-patterns](./quick/20260518-stale-intervention-patterns/) |
+| 260518-sip | Update intervention detection patterns for Claude Code v2.x | 2026-05-18 | fef31bc | [20260518-stale-intervention-patterns](./quick/20260518-stale-intervention-patterns/) |
+| 260518-acs | Add Cap submenu to File menu with all panel types | 2026-05-18 | pending | [20260518-add-cap-submenu](./quick/20260518-add-cap-submenu/) |
 
 ### Blockers/Concerns
 
