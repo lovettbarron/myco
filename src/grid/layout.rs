@@ -241,9 +241,16 @@ fn remove_from_tree(
                         *w /= sum;
                     }
                 }
-                // Rebuild taffy children
+                // Rebuild taffy children and sync flex_grow styles
                 let child_nodes: Vec<NodeId> = children.iter().map(|c| c.taffy_node_id()).collect();
                 let _ = taffy.set_children(*taffy_node, &child_nodes);
+                for (child, weight) in children.iter().zip(weights.iter()) {
+                    let tn = child.taffy_node_id();
+                    if let Ok(mut style) = taffy.style(tn).cloned() {
+                        style.flex_grow = *weight;
+                        let _ = taffy.set_style(tn, style);
+                    }
+                }
                 RemoveResult::Removed
             } else {
                 RemoveResult::NotFound

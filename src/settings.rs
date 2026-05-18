@@ -243,6 +243,8 @@ pub struct SettingsState {
     pub project_theme_index: usize,
     /// Whether .git directory is shown in sidebar.
     pub show_git_directory: bool,
+    /// Whether panel focus follows the mouse cursor.
+    pub focus_follows_mouse: bool,
 }
 
 impl SettingsState {
@@ -265,6 +267,7 @@ impl SettingsState {
             project_theme_dropdown: DropdownState::Closed,
             project_theme_index: 0,
             show_git_directory: false,
+            focus_follows_mouse: false,
         }
     }
 
@@ -1027,6 +1030,39 @@ impl SettingsRenderer {
                     font_size: 13.0,
                     color: fg_primary_color,
                 });
+
+                // "Focus" sub-heading
+                labels.push(TextLabel {
+                    text: "Focus".to_string(),
+                    x: content_x,
+                    y: toggle_y + 40.0,
+                    width: 200.0,
+                    height: 20.0,
+                    font_size: 13.0,
+                    color: fg_secondary_color,
+                });
+
+                // Focus follows mouse toggle
+                let ffm_toggle_y = toggle_y + 40.0 + 28.0;
+                let ffm_checkbox = if state.focus_follows_mouse { "\u{2611}" } else { "\u{2610}" };
+                labels.push(TextLabel {
+                    text: ffm_checkbox.to_string(),
+                    x: content_x,
+                    y: ffm_toggle_y,
+                    width: 20.0,
+                    height: 20.0,
+                    font_size: 15.0,
+                    color: fg_primary_color,
+                });
+                labels.push(TextLabel {
+                    text: "Focus follows mouse".to_string(),
+                    x: content_x + 24.0,
+                    y: ffm_toggle_y + 1.0,
+                    width: 300.0,
+                    height: 20.0,
+                    font_size: 13.0,
+                    color: fg_primary_color,
+                });
             }
             SettingsSection::Shortcuts => {
                 Self::build_shortcuts_labels(
@@ -1764,7 +1800,7 @@ impl SettingsState {
             }
         }
 
-        // Check .git toggle click (Editor section)
+        // Check Editor section toggles
         if self.active_section == SettingsSection::Editor {
             let content_x = NAV_COLUMN_WIDTH + CONTENT_PADDING;
             let content_y = viewport_y + CONTENT_PADDING;
@@ -1772,6 +1808,11 @@ impl SettingsState {
             if x >= content_x && x <= content_x + 320.0 && y >= toggle_y && y <= toggle_y + 20.0 {
                 self.show_git_directory = !self.show_git_directory;
                 return SettingsClickResult::ShowGitDirectoryToggled(self.show_git_directory);
+            }
+            let ffm_toggle_y = toggle_y + 40.0 + 28.0;
+            if x >= content_x && x <= content_x + 320.0 && y >= ffm_toggle_y && y <= ffm_toggle_y + 20.0 {
+                self.focus_follows_mouse = !self.focus_follows_mouse;
+                return SettingsClickResult::FocusFollowsMouseToggled(self.focus_follows_mouse);
             }
         }
 
@@ -1794,6 +1835,8 @@ pub enum SettingsClickResult {
     ProjectThemeChanged(Option<String>),
     /// Show .git directory toggle changed.
     ShowGitDirectoryToggled(bool),
+    /// Focus follows mouse toggle changed.
+    FocusFollowsMouseToggled(bool),
 }
 
 #[cfg(test)]

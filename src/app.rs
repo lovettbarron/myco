@@ -275,6 +275,8 @@ pub struct App {
     tooltip_state: Option<TooltipState>,
     /// Whether the cursor is currently hovering the sidebar resize edge.
     sidebar_edge_hovered: bool,
+    /// Whether panel focus follows the mouse cursor (Warp-style).
+    focus_follows_mouse: bool,
     /// Last time the resource monitor was updated with terminal texts.
     /// Initialized to 10 seconds ago so the first update fires immediately.
     last_monitor_update: Instant,
@@ -332,6 +334,7 @@ impl App {
             toast_manager: crate::toast::ToastManager::new(),
             tooltip_state: None,
             sidebar_edge_hovered: false,
+            focus_follows_mouse: false,
             last_monitor_update: Instant::now() - Duration::from_secs(10),
         }
     }
@@ -518,13 +521,25 @@ impl App {
                 }
                 self.markdown_renderer.invalidate_panel_cache(&panel_id);
                 if let Some(grid) = self.grid.as_mut() {
-                    if operations::close_panel(grid, panel_id) {
+                    if grid.panel_count() <= 1 {
+                        // Last panel: transition to empty workspace
+                        self.panels.clear();
+                        self.focused_panel = None;
+                        self.grid = None;
+                        self.dividers = DividerSet { dividers: Vec::new() };
+                        self.sync_child_pids();
+                        self.auto_save.mark_dirty();
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    } else if operations::close_panel(grid, panel_id) {
                         self.panels.retain(|p| p.id != panel_id);
                         if self.focused_panel == Some(panel_id) {
                             self.focused_panel =
                                 grid.panel_nodes().first().map(|(_, id)| *id);
                         }
                         self.recompute_layout();
+                        self.resize_terminals();
                         self.sync_child_pids();
                         self.auto_save.mark_dirty();
                     }
@@ -855,43 +870,40 @@ impl App {
                 }
             }
             InputAction::CreateTerminal => {
-                // Split the focused panel and create a terminal in the new slot
-                if let Some(focused_id) = self.focused_panel {
+                let new_id = if self.grid.is_none() {
+                    self.create_fresh_grid()
+                } else if let Some(focused_id) = self.focused_panel {
                     if let Some(grid) = self.grid.as_mut() {
-                        if let Some(new_id) =
-                            operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
-                        {
-                            let panel = Panel::new_terminal(new_id);
-                            self.panels.push(panel);
-                            self.focused_panel = Some(new_id);
-                            self.recompute_layout();
+                        operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
-                            // Create terminal in the new panel
-                            if let Some(tm) = &mut self.terminal_manager {
-                                if let Some(grid) = &self.grid {
-                                    if let Some(node_id) = grid.find_node(new_id) {
-                                        let (_, _, pw, ph) = grid.get_panel_rect(node_id);
-                                        let cw = self.terminal_renderer.cell_width;
-                                        let ch = self.terminal_renderer.cell_height;
-                                        let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cw).max(2.0) as usize;
-                                        let rows = ((ph - PANEL_TITLE_HEIGHT) / ch)
-                                            .max(1.0)
-                                            as usize;
-                                        if let Err(e) =
-                                            tm.create_terminal(new_id, cols, rows)
-                                        {
-                                            warn!(
-                                                "Failed to create terminal: {}",
-                                                e
-                                            );
-                                        }
-                                    }
+                if let Some(new_id) = new_id {
+                    let panel = Panel::new_terminal(new_id);
+                    self.panels.push(panel);
+                    self.focused_panel = Some(new_id);
+                    self.recompute_layout();
+
+                    if let Some(tm) = &mut self.terminal_manager {
+                        if let Some(grid) = &self.grid {
+                            if let Some(node_id) = grid.find_node(new_id) {
+                                let (_, _, pw, ph) = grid.get_panel_rect(node_id);
+                                let cw = self.terminal_renderer.cell_width;
+                                let ch = self.terminal_renderer.cell_height;
+                                let cols = ((pw - PANEL_CONTENT_PADDING * 2.0) / cw).max(2.0) as usize;
+                                let rows = ((ph - PANEL_TITLE_HEIGHT) / ch).max(1.0) as usize;
+                                if let Err(e) = tm.create_terminal(new_id, cols, rows) {
+                                    warn!("Failed to create terminal: {}", e);
                                 }
                             }
-                            self.sync_child_pids();
-                            self.auto_save.mark_dirty();
                         }
                     }
+                    self.sync_child_pids();
+                    self.auto_save.mark_dirty();
                 }
             }
 
@@ -1148,42 +1160,47 @@ impl App {
 
             // === Canvas actions (Phase 3) ===
             InputAction::CreateCanvas => {
-                if let Some(focused_id) = self.focused_panel {
+                let new_id = if self.grid.is_none() {
+                    self.create_fresh_grid()
+                } else if let Some(focused_id) = self.focused_panel {
                     if let Some(grid) = self.grid.as_mut() {
-                        if let Some(new_id) =
-                            operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
-                        {
-                            let canvas_id = format!(
-                                "canvas-{}",
-                                std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs()
-                            );
-                            let panel = Panel::new_canvas(new_id, canvas_id.clone());
-                            self.panels.push(panel);
-                            self.focused_panel = Some(new_id);
-                            self.recompute_layout();
+                        operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
-                            // Create canvas webview
-                            if let Some(bounds) = self.panel_content_bounds(new_id) {
-                                if let (Some(cm), Some(window), Some(proxy)) =
-                                    (&mut self.canvas_manager, &self.window, &self.proxy)
-                                {
-                                    if let Err(e) = cm.create_canvas(
-                                        new_id,
-                                        &canvas_id,
-                                        window,
-                                        bounds,
-                                        proxy.clone(),
-                                    ) {
-                                        warn!("Failed to create canvas: {}", e);
-                                    }
-                                }
+                if let Some(new_id) = new_id {
+                    let canvas_id = format!(
+                        "canvas-{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    );
+                    let panel = Panel::new_canvas(new_id, canvas_id.clone());
+                    self.panels.push(panel);
+                    self.focused_panel = Some(new_id);
+                    self.recompute_layout();
+
+                    if let Some(bounds) = self.panel_content_bounds(new_id) {
+                        if let (Some(cm), Some(window), Some(proxy)) =
+                            (&mut self.canvas_manager, &self.window, &self.proxy)
+                        {
+                            if let Err(e) = cm.create_canvas(
+                                new_id,
+                                &canvas_id,
+                                window,
+                                bounds,
+                                proxy.clone(),
+                            ) {
+                                warn!("Failed to create canvas: {}", e);
                             }
-                            self.auto_save.mark_dirty();
                         }
                     }
+                    self.auto_save.mark_dirty();
                 }
             }
             InputAction::CanvasIpcMessage { panel_id, message } => {
@@ -1247,22 +1264,29 @@ impl App {
                     }
                     self.focused_panel = Some(md_id);
                 } else {
-                    // Split focused panel to create new markdown panel
-                    if let Some(focused_id) = self.focused_panel {
+                    let new_id = if self.grid.is_none() {
+                        self.create_fresh_grid()
+                    } else if let Some(focused_id) = self.focused_panel {
                         if let Some(grid) = self.grid.as_mut() {
-                            if let Some(new_id) = operations::split_panel(
+                            operations::split_panel(
                                 grid,
                                 focused_id,
                                 SplitDirection::Horizontal,
-                            ) {
-                                let panel = Panel::new_markdown(new_id, path.clone());
-                                self.panels.push(panel);
-                                self.focused_panel = Some(new_id);
-                                self.recompute_layout();
-                                if let Some(mm) = &mut self.markdown_manager {
-                                    let _ = mm.create_markdown(new_id, path);
-                                }
-                            }
+                            )
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(new_id) = new_id {
+                        let panel = Panel::new_markdown(new_id, path.clone());
+                        self.panels.push(panel);
+                        self.focused_panel = Some(new_id);
+                        self.recompute_layout();
+                        if let Some(mm) = &mut self.markdown_manager {
+                            let _ = mm.create_markdown(new_id, path);
                         }
                     }
                 }
@@ -1482,6 +1506,12 @@ impl App {
                 );
                 let prefs = crate::config::global::load_global_preferences();
                 self.settings.show_git_directory = prefs.show_git_directory;
+                self.settings.focus_follows_mouse = prefs.focus_follows_mouse;
+                if let Some(cm) = &self.canvas_manager {
+                    for (_id, wv) in cm.webviews() {
+                        let _ = wv.set_visible(false);
+                    }
+                }
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -1489,6 +1519,14 @@ impl App {
             }
             InputAction::CloseSettings => {
                 self.settings.close();
+                if let Some(cm) = &self.canvas_manager {
+                    for (id, wv) in cm.webviews() {
+                        let is_frozen = self.panels.iter().any(|p| p.id == *id && p.frozen);
+                        if !is_frozen {
+                            let _ = wv.set_visible(true);
+                        }
+                    }
+                }
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -2128,6 +2166,7 @@ impl App {
 
         // Create file sidebar state
         let global_prefs_for_sidebar = crate::config::global::load_global_preferences();
+        self.focus_follows_mouse = global_prefs_for_sidebar.focus_follows_mouse;
         let mut sidebar = SidebarState::new(project_path.clone(), global_prefs_for_sidebar.show_git_directory);
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
@@ -2223,37 +2262,80 @@ impl App {
     }
 
     /// Create a canvas panel with the given canvas_id.
-    /// Shared between CreateCanvas action and sidebar-triggered canvas creation.
+    /// If a panel with this canvas_id is already open, focus it instead.
     fn create_canvas_with_id(&mut self, canvas_id: &str) {
-        if let Some(focused_id) = self.focused_panel {
+        debug!("create_canvas_with_id: canvas_id={}, focused_panel={:?}", canvas_id, self.focused_panel);
+        // Check if this canvas is already open — focus it instead of duplicating
+        if let Some(existing) = self.panels.iter().find(|p| {
+            p.panel_type == PanelType::Canvas && p.canvas_id.as_deref() == Some(canvas_id)
+        }) {
+            let id = existing.id;
+            self.pending_actions.push(InputAction::FocusPanel { panel_id: id });
+            return;
+        }
+        let new_id = if self.grid.is_none() {
+            self.create_fresh_grid()
+        } else if let Some(focused_id) = self.focused_panel {
             if let Some(grid) = self.grid.as_mut() {
-                if let Some(new_id) =
-                    operations::split_panel(grid, focused_id, SplitDirection::Horizontal)
-                {
-                    let panel = Panel::new_canvas(new_id, canvas_id.to_string());
-                    self.panels.push(panel);
-                    self.focused_panel = Some(new_id);
-                    self.recompute_layout();
+                let split_result = operations::split_panel(grid, focused_id, SplitDirection::Horizontal);
+                debug!("create_canvas_with_id: split_result={:?}", split_result);
+                split_result
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
-                    // Create canvas webview
-                    if let Some(bounds) = self.panel_content_bounds(new_id) {
-                        if let (Some(cm), Some(window), Some(proxy)) =
-                            (&mut self.canvas_manager, &self.window, &self.proxy)
-                        {
-                            if let Err(e) = cm.create_canvas(
-                                new_id,
-                                canvas_id,
-                                window,
-                                bounds,
-                                proxy.clone(),
-                            ) {
-                                warn!("Failed to create canvas: {}", e);
-                            }
-                        }
+        if let Some(new_id) = new_id {
+            let panel = Panel::new_canvas(new_id, canvas_id.to_string());
+            self.panels.push(panel);
+            self.focused_panel = Some(new_id);
+            self.recompute_layout();
+
+            if let Some(bounds) = self.panel_content_bounds(new_id) {
+                if let (Some(cm), Some(window), Some(proxy)) =
+                    (&mut self.canvas_manager, &self.window, &self.proxy)
+                {
+                    if let Err(e) = cm.create_canvas(
+                        new_id,
+                        canvas_id,
+                        window,
+                        bounds,
+                        proxy.clone(),
+                    ) {
+                        warn!("Failed to create canvas: {}", e);
                     }
                 }
             }
         }
+    }
+
+    /// Create a fresh single-panel grid when the workspace is empty.
+    /// Returns the new PanelId, or None if a grid already exists.
+    fn create_fresh_grid(&mut self) -> Option<PanelId> {
+        if self.grid.is_some() {
+            return None;
+        }
+        let mut grid = GridLayout::new_single_panel();
+        let panel_id = PanelId(0);
+
+        let sidebar_w = self.sidebar_width();
+        if let Some(window) = &self.window {
+            let size = window.inner_size();
+            if size.width > 0 && size.height > 0 {
+                let w = size.width as f32 / self.scale_factor;
+                let h = size.height as f32 / self.scale_factor;
+                let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+                let grid_width = w - sidebar_w;
+                grid.compute(grid_width, grid_height.max(1.0));
+            }
+        }
+
+        self.grid = Some(grid);
+        self.focused_panel = Some(panel_id);
+        self.recompute_layout();
+        Some(panel_id)
     }
 
     /// Recompute grid layout and divider positions.
@@ -2507,10 +2589,6 @@ impl App {
     ) -> (Vec<QuadInstance>, Vec<TextLabel>) {
         let mut quads = Vec::new();
         let mut pill_label_buf: Vec<TextLabel> = Vec::new();
-        let grid = match &self.grid {
-            Some(g) => g,
-            None => return (quads, pill_label_buf),
-        };
 
         quads.push(QuadInstance {
             position: [0.0, 0.0],
@@ -2557,7 +2635,8 @@ impl App {
             }
         }
 
-        // Panel quads
+        // Panel quads (only when grid exists)
+        if let Some(grid) = &self.grid {
         for &(node, panel_id) in grid.panel_nodes() {
             let (px, py, pw, ph) = grid.get_panel_rect(node);
             // Offset panel x position by sidebar width
@@ -2926,6 +3005,7 @@ impl App {
                 }
             }
         }
+        } // end if let Some(grid)
 
         // Init prompt overlay
         if self.init_prompt == InitPrompt::Showing {
@@ -3012,10 +3092,6 @@ impl App {
     #[allow(clippy::unused_self)]
     fn build_labels(&self, width: f32, height: f32, snapshots: &HashMap<PanelId, TerminalSnapshot>) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        let grid = match &self.grid {
-            Some(g) => g,
-            None => return labels,
-        };
 
         // Title bar breadcrumb (D-14): "Myco > Untitled Project"
         labels.push(TextLabel {
@@ -3055,7 +3131,8 @@ impl App {
             labels.extend(bottom_labels);
         }
 
-        // Panel labels
+        // Panel labels (only when grid exists)
+        if let Some(grid) = &self.grid {
         for &(node, panel_id) in grid.panel_nodes() {
             let (px, py, pw, ph) = grid.get_panel_rect(node);
             let px = px + sidebar_offset;
@@ -3309,6 +3386,7 @@ impl App {
                 }
             }
         }
+        } // end if let Some(grid)
 
         // Init prompt labels
         if self.init_prompt == InitPrompt::Showing {
@@ -3713,6 +3791,7 @@ impl ApplicationHandler<UserEvent> for App {
 
         // Create file sidebar state with project registry data
         let global_prefs_for_sidebar = crate::config::global::load_global_preferences();
+        self.focus_follows_mouse = global_prefs_for_sidebar.focus_follows_mouse;
         let mut sidebar = SidebarState::new(project_dir.clone(), global_prefs_for_sidebar.show_git_directory);
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
@@ -3969,17 +4048,43 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
-                if let Some(grid) = &self.grid {
-                    let actions = self.mouse_state.on_cursor_moved(
+                self.mouse_state.cursor_x = lx;
+                self.mouse_state.cursor_y = ly;
+                let cursor_actions = if let Some(grid) = &self.grid {
+                    self.mouse_state.on_cursor_moved(
                         lx,
                         ly,
                         &self.dividers,
                         grid,
                         TOP_CHROME_HEIGHT,
-                    );
-                    let actions: Vec<_> = actions;
-                    for action in actions {
-                        self.process_action(action);
+                    )
+                } else {
+                    Vec::new()
+                };
+                for action in cursor_actions {
+                    self.process_action(action);
+                }
+
+                if self.focus_follows_mouse {
+                    let focus_target = if let Some(grid) = &self.grid {
+                        let fx = lx as f32;
+                        let fy = ly as f32;
+                        grid.panel_nodes().iter().find_map(|&(node, panel_id)| {
+                            let (px, py, pw, ph) = grid.get_panel_rect(node);
+                            let py_adj = py + TOP_CHROME_HEIGHT;
+                            if fx >= px && fx <= px + pw && fy >= py_adj && fy <= py_adj + ph
+                                && self.focused_panel != Some(panel_id)
+                            {
+                                Some(panel_id)
+                            } else {
+                                None
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    if let Some(panel_id) = focus_target {
+                        self.process_action(InputAction::FocusPanel { panel_id });
                     }
                 }
 
@@ -4082,6 +4187,12 @@ impl ApplicationHandler<UserEvent> for App {
                             prefs.show_git_directory = show;
                             crate::config::global::save_global_preferences(&prefs);
                         }
+                        SettingsClickResult::FocusFollowsMouseToggled(enabled) => {
+                            self.focus_follows_mouse = enabled;
+                            let mut prefs = crate::config::global::load_global_preferences();
+                            prefs.focus_follows_mouse = enabled;
+                            crate::config::global::save_global_preferences(&prefs);
+                        }
                         SettingsClickResult::ShortcutRecordingStarted
                         | SettingsClickResult::SectionChanged
                         | SettingsClickResult::Consumed => {}
@@ -4132,8 +4243,12 @@ impl ApplicationHandler<UserEvent> for App {
                     let sidebar_y = ly - TOP_CHROME_HEIGHT;
                     // Handle sidebar click
                     if let Some(sidebar) = &mut self.sidebar {
-                        if let Some(index) = sidebar.entry_at_y(sidebar_y) {
-                            if let Some(action) = sidebar.click_entry(index) {
+                        let index_result = sidebar.entry_at_y(sidebar_y);
+                        debug!("Sidebar click: sidebar_y={}, entry_index={:?}", sidebar_y, index_result);
+                        if let Some(index) = index_result {
+                            let action = sidebar.click_entry(index);
+                            debug!("Sidebar click_entry result: {:?}", action);
+                            if let Some(action) = action {
                                 match action {
                                     SidebarAction::OpenMarkdown(path) => {
                                         self.process_action(InputAction::OpenMarkdown { path });
@@ -4143,6 +4258,7 @@ impl ApplicationHandler<UserEvent> for App {
                                             .file_stem()
                                             .map(|s| s.to_string_lossy().to_string())
                                             .unwrap_or_else(|| "unknown".to_string());
+                                        debug!("Opening canvas from sidebar: canvas_id={}", canvas_id);
                                         self.create_canvas_with_id(&canvas_id);
                                     }
                                     SidebarAction::CreateCanvas(canvas_id, _path) => {

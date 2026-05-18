@@ -292,25 +292,11 @@ impl MouseState {
                             is_right_click: true,
                         });
                     } else {
-                        // Right-click in other panel body: determine split direction
-                        if let Some(node) = grid.find_node(panel_id) {
-                            let (px, py, pw, ph) = grid.get_panel_rect(node);
-                            let py_offset = py + title_bar_height;
-
-                            let rel_x = x as f32 - px;
-                            let rel_y = y as f32 - py_offset;
-
-                            let x_third = pw / 3.0;
-                            let y_third = ph / 3.0;
-                            let in_horizontal_third = rel_x < x_third || rel_x > x_third * 2.0;
-                            let in_vertical_third = rel_y < y_third || rel_y > y_third * 2.0;
-
-                            if in_vertical_third && !in_horizontal_third {
-                                actions.push(InputAction::PanelSplitVertical { panel_id });
-                            } else {
-                                actions.push(InputAction::PanelSplitHorizontal { panel_id });
-                            }
-                        }
+                        actions.push(InputAction::ContextMenu {
+                            panel_id,
+                            x: x as f32,
+                            y: y as f32,
+                        });
                     }
                 }
             }

@@ -27,6 +27,9 @@ pub struct GlobalPreferences {
     /// Whether to show .git directory in the sidebar (default: false).
     #[serde(default)]
     pub show_git_directory: bool,
+    /// Whether panel focus follows the mouse cursor (default: false).
+    #[serde(default)]
+    pub focus_follows_mouse: bool,
 }
 
 impl Default for GlobalPreferences {
@@ -37,6 +40,7 @@ impl Default for GlobalPreferences {
             font_family: None,
             font_size: None,
             show_git_directory: false,
+            focus_follows_mouse: false,
         }
     }
 }
@@ -159,6 +163,7 @@ mod tests {
             font_family: Some("JetBrains Mono".to_string()),
             font_size: Some(14.0),
             show_git_directory: false,
+            focus_follows_mouse: false,
         };
 
         let json = serde_json::to_string_pretty(&prefs).unwrap();
