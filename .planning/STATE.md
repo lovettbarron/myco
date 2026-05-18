@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 Phase: 03 (Plan 03-03 remaining)
 Completed: Phases 01-02, 04-09 (28/29 plans)
 Status: Near-complete — one plan left + uncommitted Excalidraw migration
-Last activity: 2026-05-18 -- Phases 08+09 executed, TLDraw→Excalidraw migration
+Last activity: 2026-05-18 -- Completed quick task 260518-t0k: sidebar file browser improvements
 
 Progress: [█████████▒] 97%
 
@@ -125,6 +125,7 @@ None yet.
 | 260516-cls | Column-local vertical split refactor (Cmd+D splits only focused column) | 2026-05-16 | 677ba88 | [20260516-column-local-split](./quick/20260516-column-local-split/) |
 | 260518-sip | Update intervention detection patterns for Claude Code v2.x | 2026-05-18 | fef31bc | [20260518-stale-intervention-patterns](./quick/20260518-stale-intervention-patterns/) |
 | 260518-acs | Add Cap submenu to File menu with all panel types | 2026-05-18 | 0774c49 | [20260518-add-cap-submenu](./quick/20260518-add-cap-submenu/) |
+| 260518-t0k | Improve sidebar file browser: fix emoji chevrons, file-type color coding, hide .DS_Store | 2026-05-18 | f5afd46 | [260518-t0k-improve-sidebar-file-browser-to-match-wa](./quick/260518-t0k-improve-sidebar-file-browser-to-match-wa/) |
 
 ### Blockers/Concerns
 
