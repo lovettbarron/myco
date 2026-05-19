@@ -244,7 +244,7 @@ Plans:
 - [x] 10-03-PLAN.md -- Background heartbeat scheduler (named thread with interval timer, job execution pipeline: glob resolve -> prompt assemble -> LLM call -> severity parse -> result persist, exponential backoff for Ollama unavailability, concurrency control, SchedulerCommand channel)
 
 **Wave 3** *(integration + polish, depends on Wave 2)*
-- [ ] 10-04-PLAN.md -- App.rs wiring and stats bar (scheduler lifecycle, HeartbeatEvent handling, rendering dispatch for sidebar + caps, InputAction routing, grid layout right sidebar deduction, file watcher job reload, toast notifications, stats bar heartbeat indicator with pulsing dot)
+- [x] 10-04-PLAN.md -- App.rs wiring and stats bar (scheduler lifecycle, HeartbeatEvent handling, rendering dispatch for sidebar + caps, InputAction routing, grid layout right sidebar deduction, file watcher job reload, toast notifications, stats bar heartbeat indicator with pulsing dot)
 - [ ] 10-05-PLAN.md -- Polish and verification (job toggle persist, README.md generation, Ollama auto-detect, PanelType::Heartbeat config serialization, human verification checkpoint)
 
 ## Progress
@@ -266,4 +266,4 @@ Note: Phase 10 (Agentic Heartbeat) depends on Phase 6+8 patterns. Research compl
 | 7. Testing Infrastructure | 3/3 | Complete | 2026-05-17 |
 | 8. Agent Monitor Cap | 3/3 | Complete | 2026-05-18 |
 | 9. Grid Layout Refactor | 3/3 | Complete | 2026-05-18 |
-| 10. Agentic Heartbeat Cap | 3/5 | In Progress|  |
+| 10. Agentic Heartbeat Cap | 4/5 | In Progress|  |
