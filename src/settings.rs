@@ -245,6 +245,8 @@ pub struct SettingsState {
     pub show_git_directory: bool,
     /// Whether panel focus follows the mouse cursor.
     pub focus_follows_mouse: bool,
+    /// Whether to auto-open the last project on startup.
+    pub open_last_project: bool,
 }
 
 impl SettingsState {
@@ -268,6 +270,7 @@ impl SettingsState {
             project_theme_index: 0,
             show_git_directory: false,
             focus_follows_mouse: false,
+            open_last_project: false,
         }
     }
 
@@ -1063,6 +1066,39 @@ impl SettingsRenderer {
                     font_size: 13.0,
                     color: fg_primary_color,
                 });
+
+                // "Startup" sub-heading
+                labels.push(TextLabel {
+                    text: "Startup".to_string(),
+                    x: content_x,
+                    y: ffm_toggle_y + 40.0,
+                    width: 200.0,
+                    height: 20.0,
+                    font_size: 13.0,
+                    color: fg_secondary_color,
+                });
+
+                // Open last project on startup toggle
+                let olp_toggle_y = ffm_toggle_y + 40.0 + 28.0;
+                let olp_checkbox = if state.open_last_project { "\u{2611}" } else { "\u{2610}" };
+                labels.push(TextLabel {
+                    text: olp_checkbox.to_string(),
+                    x: content_x,
+                    y: olp_toggle_y,
+                    width: 20.0,
+                    height: 20.0,
+                    font_size: 15.0,
+                    color: fg_primary_color,
+                });
+                labels.push(TextLabel {
+                    text: "Open last project on startup".to_string(),
+                    x: content_x + 24.0,
+                    y: olp_toggle_y + 1.0,
+                    width: 300.0,
+                    height: 20.0,
+                    font_size: 13.0,
+                    color: fg_primary_color,
+                });
             }
             SettingsSection::Shortcuts => {
                 Self::build_shortcuts_labels(
@@ -1814,6 +1850,11 @@ impl SettingsState {
                 self.focus_follows_mouse = !self.focus_follows_mouse;
                 return SettingsClickResult::FocusFollowsMouseToggled(self.focus_follows_mouse);
             }
+            let olp_toggle_y = ffm_toggle_y + 40.0 + 28.0;
+            if x >= content_x && x <= content_x + 320.0 && y >= olp_toggle_y && y <= olp_toggle_y + 20.0 {
+                self.open_last_project = !self.open_last_project;
+                return SettingsClickResult::OpenLastProjectToggled(self.open_last_project);
+            }
         }
 
         SettingsClickResult::Consumed
@@ -1837,6 +1878,8 @@ pub enum SettingsClickResult {
     ShowGitDirectoryToggled(bool),
     /// Focus follows mouse toggle changed.
     FocusFollowsMouseToggled(bool),
+    /// Open last project on startup toggle changed.
+    OpenLastProjectToggled(bool),
 }
 
 #[cfg(test)]
@@ -2066,6 +2109,42 @@ mod tests {
             None,
         );
         assert_eq!(state.project_theme_index, 0); // Global Default
+    }
+
+    #[test]
+    fn test_open_last_project_toggle_click() {
+        let mut state = SettingsState::new();
+        let themes = vec!["Dracula".to_string()];
+        state.open(themes, "Dracula");
+
+        // Navigate to Editor section
+        let viewport_y = 62.0;
+        let nav_start = viewport_y + CONTENT_PADDING + 48.0;
+        let _ = state.handle_click(50.0, nav_start + NAV_ENTRY_HEIGHT + 5.0, viewport_y);
+        assert_eq!(state.active_section, SettingsSection::Editor);
+
+        // Compute the open_last_project toggle position
+        let content_x = NAV_COLUMN_WIDTH + CONTENT_PADDING;
+        let content_y = viewport_y + CONTENT_PADDING;
+        let toggle_y = content_y + 48.0 + 28.0;
+        let ffm_toggle_y = toggle_y + 40.0 + 28.0;
+        let olp_toggle_y = ffm_toggle_y + 40.0 + 28.0;
+
+        // First click: false -> true
+        let result = state.handle_click(content_x + 10.0, olp_toggle_y + 5.0, viewport_y);
+        match result {
+            SettingsClickResult::OpenLastProjectToggled(val) => assert!(val),
+            other => panic!("Expected OpenLastProjectToggled(true), got {:?}", other),
+        }
+        assert!(state.open_last_project);
+
+        // Second click: true -> false
+        let result = state.handle_click(content_x + 10.0, olp_toggle_y + 5.0, viewport_y);
+        match result {
+            SettingsClickResult::OpenLastProjectToggled(val) => assert!(!val),
+            other => panic!("Expected OpenLastProjectToggled(false), got {:?}", other),
+        }
+        assert!(!state.open_last_project);
     }
 
     #[test]

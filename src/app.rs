@@ -4675,7 +4675,8 @@ impl ApplicationHandler<UserEvent> for App {
                             prefs.focus_follows_mouse = enabled;
                             crate::config::global::save_global_preferences(&prefs);
                         }
-                        SettingsClickResult::ShortcutRecordingStarted
+                        SettingsClickResult::OpenLastProjectToggled(_)
+                        | SettingsClickResult::ShortcutRecordingStarted
                         | SettingsClickResult::SectionChanged
                         | SettingsClickResult::Consumed => {}
                     }

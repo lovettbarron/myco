@@ -137,6 +137,9 @@ pub struct GlobalPreferences {
     /// Whether panel focus follows the mouse cursor (default: false).
     #[serde(default)]
     pub focus_follows_mouse: bool,
+    /// Whether to auto-open the last project on startup instead of showing the picker (default: false).
+    #[serde(default)]
+    pub open_last_project: bool,
     /// LLM configuration for heartbeat jobs.
     #[serde(default)]
     pub llm: LlmConfig,
@@ -151,6 +154,7 @@ impl Default for GlobalPreferences {
             font_size: None,
             show_git_directory: false,
             focus_follows_mouse: false,
+            open_last_project: false,
             llm: LlmConfig::default(),
         }
     }
@@ -275,6 +279,7 @@ mod tests {
             font_size: Some(14.0),
             show_git_directory: false,
             focus_follows_mouse: false,
+            open_last_project: false,
             llm: LlmConfig::default(),
         };
 
@@ -339,6 +344,24 @@ mod tests {
         assert_eq!(prefs.llm.default_provider, "ollama");
         assert_eq!(prefs.llm.ollama.endpoint, "http://localhost:11434");
         assert_eq!(prefs.llm.anthropic.model, "claude-haiku-4-5");
+    }
+
+    #[test]
+    fn test_global_preferences_backward_compat_no_open_last_project_field() {
+        // Simulate existing preferences.json without the open_last_project field
+        let json = r#"{
+            "version": 1,
+            "default_theme": "Dracula",
+            "show_git_directory": false,
+            "focus_follows_mouse": true
+        }"#;
+
+        let prefs: GlobalPreferences = serde_json::from_str(json).unwrap();
+        assert_eq!(prefs.version, 1);
+        assert_eq!(prefs.default_theme, "Dracula");
+        assert!(prefs.focus_follows_mouse);
+        // open_last_project should default to false
+        assert!(!prefs.open_last_project);
     }
 
     #[test]
