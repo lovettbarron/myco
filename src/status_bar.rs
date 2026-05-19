@@ -70,6 +70,26 @@ impl StatsBar {
         }
     }
 
+    /// Update the heartbeat indicator slot (index 2).
+    ///
+    /// Shows "HB: N running" or "HB: idle" when jobs exist; hides the slot
+    /// when no heartbeat jobs are configured.
+    pub fn update_heartbeat(&mut self, running: usize, has_jobs: bool) {
+        if let Some(slot) = self.slots.get_mut(2) {
+            if has_jobs {
+                slot.visible = true;
+                slot.label = "HB".to_string();
+                slot.value = if running > 0 {
+                    format!("{} running", running)
+                } else {
+                    "idle".to_string()
+                };
+            } else {
+                slot.visible = false;
+            }
+        }
+    }
+
     /// Update uptime slot from elapsed time since start.
     pub fn update_uptime(&mut self) {
         let elapsed = self.start_time.elapsed();

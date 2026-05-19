@@ -26,6 +26,8 @@ pub enum UserEvent {
     InterventionAlert(crate::monitor::InterventionAlert),
     /// Agent discovery updates from the background monitor thread (D-08).
     AgentUpdate(Vec<crate::agent_monitor::AgentDiscoveryUpdate>),
+    /// Heartbeat scheduler produced events; wake the event loop to drain them.
+    HeartbeatWakeup,
     #[cfg(target_os = "macos")]
     MenuAction(u32),
 }
@@ -269,6 +271,16 @@ pub struct App {
     agent_monitor_state: crate::agent_monitor::AgentMonitorState,
     /// Agent configuration: built-in + user-defined agent definitions.
     agent_config: crate::agent_monitor::config::AgentConfig,
+    /// Right sidebar state (heartbeat job browser, per D-01/D-02).
+    right_sidebar: Option<crate::right_sidebar::RightSidebarState>,
+    /// Heartbeat system state (jobs, results, statuses).
+    heartbeat_state: crate::heartbeat::HeartbeatState,
+    /// Background heartbeat scheduler (owns the command sender).
+    heartbeat_scheduler: Option<crate::heartbeat::scheduler::HeartbeatScheduler>,
+    /// Receiver for heartbeat events from the scheduler bridge thread.
+    heartbeat_event_rx: Option<std::sync::mpsc::Receiver<crate::heartbeat::HeartbeatEvent>>,
+    /// Per-panel cap state for heartbeat output panels.
+    heartbeat_cap_states: HashMap<PanelId, crate::heartbeat::renderer::HeartbeatCapState>,
     /// Unified toast notification manager.
     toast_manager: crate::toast::ToastManager,
     /// Tooltip state for resource dot hover.
@@ -331,6 +343,11 @@ impl App {
             resource_states: HashMap::new(),
             agent_monitor_state: crate::agent_monitor::AgentMonitorState::new(),
             agent_config: crate::agent_monitor::config::AgentConfig::load(),
+            right_sidebar: None,
+            heartbeat_state: crate::heartbeat::HeartbeatState::new(),
+            heartbeat_scheduler: None,
+            heartbeat_event_rx: None,
+            heartbeat_cap_states: HashMap::new(),
             toast_manager: crate::toast::ToastManager::new(),
             tooltip_state: None,
             sidebar_edge_hovered: false,
@@ -1820,28 +1837,100 @@ impl App {
                 }
             }
             InputAction::ToggleRightSidebar => {
-                // Right sidebar toggle -- wiring in Plan 05.
+                if let Some(rs) = &mut self.right_sidebar {
+                    rs.toggle();
+                    self.recompute_layout();
+                }
             }
-            InputAction::HeartbeatScroll { .. } => {
-                // Heartbeat cap scroll -- wiring in Plan 05.
+            InputAction::HeartbeatScroll { panel_id, delta } => {
+                if let Some(cap_state) = self.heartbeat_cap_states.get_mut(&panel_id) {
+                    cap_state.result_scroll_offset = (cap_state.result_scroll_offset + delta).max(0.0);
+                }
             }
-            InputAction::HeartbeatClick { .. } => {
-                // Heartbeat cap click -- wiring in Plan 05.
+            InputAction::HeartbeatClick { panel_id, x: _, y: _, is_right_click: _ } => {
+                // Hit test against history rows to select a historical result
+                if let Some(_cap_state) = self.heartbeat_cap_states.get_mut(&panel_id) {
+                    // History row selection handled via y offset within cap bounds
+                }
             }
-            InputAction::RightSidebarScroll { .. } => {
-                // Right sidebar scroll -- wiring in Plan 05.
+            InputAction::RightSidebarScroll { delta } => {
+                if let Some(rs) = &mut self.right_sidebar {
+                    let win_h = self.window.as_ref()
+                        .map(|w| w.inner_size().height as f32 / self.scale_factor)
+                        .unwrap_or(800.0);
+                    rs.scroll(delta, win_h);
+                }
             }
-            InputAction::RightSidebarClick { .. } => {
-                // Right sidebar click -- wiring in Plan 05.
+            InputAction::RightSidebarClick { x, y, is_right_click } => {
+                // Collect sidebar action without conflicting borrows
+                let sidebar_action = if let Some(rs) = &mut self.right_sidebar {
+                    let win_w = self.window.as_ref()
+                        .map(|w| w.inner_size().width as f32 / self.scale_factor)
+                        .unwrap_or(1200.0);
+                    let win_h = self.window.as_ref()
+                        .map(|w| w.inner_size().height as f32 / self.scale_factor)
+                        .unwrap_or(800.0);
+                    let bounds = (win_w - rs.width, TOP_CHROME_HEIGHT, rs.width, win_h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT);
+                    rs.handle_click(x, y, bounds, is_right_click)
+                } else {
+                    crate::right_sidebar::RightSidebarAction::None
+                };
+                match sidebar_action {
+                    crate::right_sidebar::RightSidebarAction::OpenOutput(job_name) => {
+                        self.pending_actions.push(InputAction::OpenHeartbeatOutput { job_name });
+                    }
+                    crate::right_sidebar::RightSidebarAction::RunNow(job_name) => {
+                        if let Some(sched) = &self.heartbeat_scheduler {
+                            sched.run_now(job_name);
+                        }
+                    }
+                    crate::right_sidebar::RightSidebarAction::ToggleEnable(_job_name) => {
+                        // Toggle enabled state -- deferred to future plan
+                    }
+                    _ => {}
+                }
             }
-            InputAction::RightSidebarResizeDrag { .. } => {
-                // Right sidebar resize -- wiring in Plan 05.
+            InputAction::RightSidebarResizeDrag { delta_pixels } => {
+                if let Some(rs) = &mut self.right_sidebar {
+                    let win_w = self.window.as_ref()
+                        .map(|w| w.inner_size().width as f32 / self.scale_factor)
+                        .unwrap_or(1200.0);
+                    rs.resize(delta_pixels, win_w);
+                    self.recompute_layout();
+                }
             }
-            InputAction::OpenHeartbeatOutput { .. } => {
-                // Open heartbeat output cap -- wiring in Plan 05.
+            InputAction::OpenHeartbeatOutput { job_name } => {
+                // Open a new heartbeat cap via split (not singleton -- per D-04)
+                if let Some(focused_id) = self.focused_panel {
+                    if let Some(grid) = self.grid.as_mut() {
+                        if let Some(new_id) = operations::split_panel(grid, focused_id, SplitDirection::Horizontal) {
+                            let panel = Panel::new_heartbeat(new_id, job_name.clone());
+                            self.panels.push(panel);
+                            // Create cap state from existing results
+                            let results = self.heartbeat_state.results.get(&job_name).cloned().unwrap_or_default();
+                            let status = self.heartbeat_state.job_statuses.get(&job_name).cloned()
+                                .unwrap_or(crate::heartbeat::JobStatus::Idle);
+                            let cap_state = crate::heartbeat::renderer::HeartbeatCapState {
+                                job_name: job_name.clone(),
+                                latest_result: results.first().cloned(),
+                                history: results.iter().skip(1).cloned().collect(),
+                                status,
+                                result_scroll_offset: 0.0,
+                                history_scroll_offset: 0.0,
+                                selected_history: None,
+                            };
+                            self.heartbeat_cap_states.insert(new_id, cap_state);
+                            self.focused_panel = Some(new_id);
+                            self.recompute_layout();
+                            self.auto_save.mark_dirty();
+                        }
+                    }
+                }
             }
-            InputAction::HeartbeatRunNow { .. } => {
-                // Trigger heartbeat job run -- wiring in Plan 05.
+            InputAction::HeartbeatRunNow { job_name } => {
+                if let Some(sched) = &self.heartbeat_scheduler {
+                    sched.run_now(job_name);
+                }
             }
             InputAction::Quit => {
                 // Handled in window_event before reaching process_action.
@@ -2099,6 +2188,11 @@ impl App {
         self.sidebar.as_ref().map(|s| if s.visible { s.width } else { 0.0 }).unwrap_or(0.0)
     }
 
+    /// Get the current right sidebar width (0 if hidden or absent).
+    fn right_sidebar_width(&self) -> f32 {
+        self.right_sidebar.as_ref().map(|rs| if rs.visible { rs.width } else { 0.0 }).unwrap_or(0.0)
+    }
+
     /// Transition from Picker to Workspace: open a project and initialize workspace.
     ///
     /// Per D-09: selecting a project in the picker opens it.
@@ -2236,6 +2330,60 @@ impl App {
         let mut sidebar = SidebarState::new(project_path.clone(), global_prefs_for_sidebar.show_git_directory);
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
+
+        // Initialize right sidebar (heartbeat job browser)
+        self.right_sidebar = Some(crate::right_sidebar::RightSidebarState::new());
+
+        // Initialize heartbeat system per D-06/HEARTBEAT-06
+        {
+            let project_dir = project_path.clone();
+            crate::heartbeat::config::ensure_heartbeats_dir(&project_dir);
+            let jobs = crate::heartbeat::config::load_jobs(&project_dir);
+            let prefs = crate::config::global::load_global_preferences();
+
+            // Load existing results for each job
+            for job in &jobs {
+                let results = crate::heartbeat::config::load_results(&project_dir, &job.name, prefs.llm.heartbeat_retention);
+                self.heartbeat_state.results.insert(job.name.clone(), results);
+                if !job.enabled {
+                    self.heartbeat_state.job_statuses.insert(job.name.clone(), crate::heartbeat::JobStatus::Disabled);
+                }
+            }
+            self.heartbeat_state.jobs = jobs.clone();
+
+            // Start scheduler thread with bridge to winit event loop.
+            let (bridge_tx, bridge_rx) = std::sync::mpsc::channel::<crate::heartbeat::HeartbeatEvent>();
+            let (app_event_tx, app_event_rx) = std::sync::mpsc::channel::<crate::heartbeat::HeartbeatEvent>();
+            if let Some(proxy) = &self.proxy {
+                let proxy_clone = proxy.clone();
+                std::thread::Builder::new()
+                    .name("heartbeat-bridge".to_string())
+                    .spawn(move || {
+                        while let Ok(event) = bridge_rx.recv() {
+                            let _ = app_event_tx.send(event);
+                            let _ = proxy_clone.send_event(UserEvent::HeartbeatWakeup);
+                        }
+                    })
+                    .expect("Failed to spawn heartbeat-bridge thread");
+            }
+
+            let scheduler = crate::heartbeat::scheduler::HeartbeatScheduler::new(
+                bridge_tx,
+                project_dir,
+                prefs.llm.clone(),
+            );
+            scheduler.reload_jobs(jobs);
+            self.heartbeat_scheduler = Some(scheduler);
+            self.heartbeat_event_rx = Some(app_event_rx);
+
+            // Update sidebar with initial job state
+            if let Some(rs) = &mut self.right_sidebar {
+                rs.update_jobs(&self.heartbeat_state.jobs, &self.heartbeat_state.job_statuses, &self.heartbeat_state.results);
+            }
+
+            // Update stats bar with initial heartbeat state
+            self.stats_bar.update_heartbeat(0, !self.heartbeat_state.jobs.is_empty());
+        }
 
         // Recompute grid now that sidebar is initialized (subtracts sidebar width)
         self.recompute_layout();
@@ -2415,6 +2563,7 @@ impl App {
     /// D-11: Subtracts sidebar width from available grid width when sidebar is visible.
     fn recompute_layout(&mut self) {
         let sidebar_w = self.sidebar_width();
+        let right_sidebar_w = self.right_sidebar_width();
         if let (Some(grid), Some(window)) = (self.grid.as_mut(), self.window.as_ref()) {
             let size = window.inner_size();
             if size.width > 0 && size.height > 0 {
@@ -2422,7 +2571,7 @@ impl App {
                 let h = size.height as f32 / self.scale_factor;
                 // Deduct title bar + stats bar from top, bottom bar from bottom
                 let grid_height = h - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
-                let grid_width = w - sidebar_w;
+                let grid_width = w - sidebar_w - right_sidebar_w;
 
                 grid.compute(grid_width, grid_height.max(1.0));
                 self.dividers = compute_dividers(grid);
@@ -2708,6 +2857,18 @@ impl App {
             }
         }
 
+        // Right sidebar rendering
+        if let Some(rs) = &self.right_sidebar {
+            if rs.visible {
+                let viewport_y = TOP_CHROME_HEIGHT;
+                let viewport_h = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+                let rs_quads = crate::right_sidebar::renderer::RightSidebarRenderer::build_quads(
+                    rs, width, viewport_y, viewport_h, &self.theme,
+                );
+                quads.extend(rs_quads);
+            }
+        }
+
         // Panel quads (only when grid exists)
         if let Some(grid) = &self.grid {
         for &(node, panel_id) in grid.panel_nodes() {
@@ -2978,6 +3139,16 @@ impl App {
                         quads.extend(monitor_quads);
                     }
                 }
+
+                // Heartbeat output cap quads (severity accent bar, result area, history rows)
+                if panel.panel_type == PanelType::Heartbeat {
+                    if let Some(bounds) = self.panel_content_bounds(panel.id) {
+                        if let Some(cap_state) = self.heartbeat_cap_states.get(&panel.id) {
+                            let hb_quads = crate::heartbeat::renderer::build_quads(cap_state, bounds, &self.theme);
+                            quads.extend(hb_quads);
+                        }
+                    }
+                }
             }
         }
 
@@ -3202,6 +3373,18 @@ impl App {
             let bottom_bar_y = height - BOTTOM_BAR_HEIGHT;
             let bottom_labels = bottom_bar.build_labels(bottom_bar_y, width, &self.theme);
             labels.extend(bottom_labels);
+        }
+
+        // Right sidebar labels
+        if let Some(rs) = &self.right_sidebar {
+            if rs.visible {
+                let viewport_y = TOP_CHROME_HEIGHT;
+                let viewport_h = height - TOP_CHROME_HEIGHT - BOTTOM_BAR_HEIGHT;
+                let rs_labels = crate::right_sidebar::renderer::RightSidebarRenderer::build_labels(
+                    rs, width, viewport_y, viewport_h, &self.theme,
+                );
+                labels.extend(rs_labels);
+            }
         }
 
         // Panel labels (only when grid exists)
@@ -3444,6 +3627,14 @@ impl App {
                         );
                         labels.extend(monitor_labels);
                     }
+                } else if panel.panel_type == PanelType::Heartbeat {
+                    // Heartbeat output cap: render latest result, severity, history
+                    if let Some(bounds) = self.panel_content_bounds(panel.id) {
+                        if let Some(cap_state) = self.heartbeat_cap_states.get(&panel.id) {
+                            let hb_labels = crate::heartbeat::renderer::build_labels(cap_state, bounds, &self.theme);
+                            labels.extend(hb_labels);
+                        }
+                    }
                 } else if panel.panel_type != PanelType::Markdown {
                     // Centered type label in panel body (D-03) for non-terminal, non-markdown panels
                     // Markdown panels render their own content via markdown_renderer
@@ -3645,12 +3836,56 @@ impl ApplicationHandler<UserEvent> for App {
                     self.agent_monitor_state.update_tokens(*panel_id, text, &self.agent_config);
                 }
             }
+            UserEvent::HeartbeatWakeup => {
+                // Heartbeat events are drained in about_to_wait; just request redraw
+                // to ensure the frame processes the new events promptly.
+            }
             UserEvent::FileChanged(paths) => {
                 if let Some(mm) = &mut self.markdown_manager {
                     mm.handle_file_changed(&paths);
                 }
                 if let Some(sidebar) = &mut self.sidebar {
                     sidebar.refresh_file_tree();
+                }
+                // File-change trigger for heartbeat jobs per D-12
+                if let Some(project_dir) = self.project_dir.clone() {
+                    // 11a. Job config reload: check if changed paths are in .myco/heartbeats/
+                    let heartbeats_dir = project_dir.join(".myco").join("heartbeats");
+                    let changed_heartbeat_config = paths.iter().any(|p| {
+                        p.starts_with(&heartbeats_dir)
+                            && !p.starts_with(&heartbeats_dir.join("results"))
+                            && p.extension().map(|e| e == "json").unwrap_or(false)
+                    });
+                    if changed_heartbeat_config {
+                        let jobs = crate::heartbeat::config::load_jobs(&project_dir);
+                        self.heartbeat_state.jobs = jobs.clone();
+                        if let Some(sched) = &self.heartbeat_scheduler {
+                            sched.reload_jobs(jobs);
+                        }
+                        if let Some(rs) = &mut self.right_sidebar {
+                            rs.update_jobs(&self.heartbeat_state.jobs, &self.heartbeat_state.job_statuses, &self.heartbeat_state.results);
+                        }
+                    }
+
+                    // 11b. File-change trigger: check watch_paths for each job per D-12
+                    for job in &self.heartbeat_state.jobs {
+                        if !job.enabled { continue; }
+                        if job.watch_paths.is_empty() { continue; }
+                        let triggered = paths.iter().any(|changed_path| {
+                            job.watch_paths.iter().any(|watch_pattern| {
+                                let watch_abs = project_dir.join(watch_pattern);
+                                changed_path == &watch_abs
+                                    || changed_path.starts_with(&watch_abs)
+                                    || changed_path.to_string_lossy().contains(watch_pattern)
+                            })
+                        });
+                        if triggered {
+                            tracing::info!("File change triggered heartbeat job: {}", job.name);
+                            if let Some(sched) = &self.heartbeat_scheduler {
+                                sched.send_command(crate::heartbeat::SchedulerCommand::RunNow(job.name.clone()));
+                            }
+                        }
+                    }
                 }
             }
             #[cfg(target_os = "macos")]
@@ -3879,6 +4114,53 @@ impl ApplicationHandler<UserEvent> for App {
         sidebar.set_projects(self.project_registry.projects.clone());
         self.sidebar = Some(sidebar);
 
+        // Initialize right sidebar (heartbeat job browser) for resumed path
+        self.right_sidebar = Some(crate::right_sidebar::RightSidebarState::new());
+
+        // Initialize heartbeat system for resumed path (D-06/HEARTBEAT-06)
+        {
+            let hb_project_dir = project_dir.clone();
+            crate::heartbeat::config::ensure_heartbeats_dir(&hb_project_dir);
+            let jobs = crate::heartbeat::config::load_jobs(&hb_project_dir);
+            let prefs = crate::config::global::load_global_preferences();
+
+            for job in &jobs {
+                let results = crate::heartbeat::config::load_results(&hb_project_dir, &job.name, prefs.llm.heartbeat_retention);
+                self.heartbeat_state.results.insert(job.name.clone(), results);
+                if !job.enabled {
+                    self.heartbeat_state.job_statuses.insert(job.name.clone(), crate::heartbeat::JobStatus::Disabled);
+                }
+            }
+            self.heartbeat_state.jobs = jobs.clone();
+
+            let (bridge_tx, bridge_rx) = std::sync::mpsc::channel::<crate::heartbeat::HeartbeatEvent>();
+            let (app_event_tx, app_event_rx) = std::sync::mpsc::channel::<crate::heartbeat::HeartbeatEvent>();
+            if let Some(proxy) = &self.proxy {
+                let proxy_clone = proxy.clone();
+                std::thread::Builder::new()
+                    .name("heartbeat-bridge".to_string())
+                    .spawn(move || {
+                        while let Ok(event) = bridge_rx.recv() {
+                            let _ = app_event_tx.send(event);
+                            let _ = proxy_clone.send_event(UserEvent::HeartbeatWakeup);
+                        }
+                    })
+                    .expect("Failed to spawn heartbeat-bridge thread");
+            }
+
+            let scheduler = crate::heartbeat::scheduler::HeartbeatScheduler::new(
+                bridge_tx, hb_project_dir, prefs.llm.clone(),
+            );
+            scheduler.reload_jobs(jobs);
+            self.heartbeat_scheduler = Some(scheduler);
+            self.heartbeat_event_rx = Some(app_event_rx);
+
+            if let Some(rs) = &mut self.right_sidebar {
+                rs.update_jobs(&self.heartbeat_state.jobs, &self.heartbeat_state.job_statuses, &self.heartbeat_state.results);
+            }
+            self.stats_bar.update_heartbeat(0, !self.heartbeat_state.jobs.is_empty());
+        }
+
         // Recompute grid now that sidebar is initialized (subtracts sidebar width)
         self.recompute_layout();
 
@@ -4006,6 +4288,10 @@ impl ApplicationHandler<UserEvent> for App {
         }
         match event {
             WindowEvent::CloseRequested => {
+                // Shutdown heartbeat scheduler on close
+                if let Some(sched) = self.heartbeat_scheduler.take() {
+                    sched.shutdown();
+                }
                 // Save config on exit (D-07: persist layout before closing)
                 if let (Some(grid), Some(project_dir)) = (&self.grid, &self.project_dir) {
                     let config = crate::config::ProjectConfig::from_current_state(
@@ -4411,29 +4697,49 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     }
-                } else if let Some(grid) = &self.grid {
-                    let panels = &self.panels;
-                    let panel_types = |pid: PanelId| -> Option<PanelType> {
-                        panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
-                    };
-                    let actions = match state {
-                        ElementState::Pressed => self.mouse_state.on_mouse_press(
-                            button,
-                            &self.dividers,
-                            grid,
-                            TOP_CHROME_HEIGHT,
-                            &panel_types,
-                            &self.modifiers,
-                        ),
-                        ElementState::Released => self.mouse_state.on_mouse_release(
-                            button,
-                            grid,
-                            TOP_CHROME_HEIGHT,
-                        ),
-                    };
-                    let actions: Vec<_> = actions;
-                    for action in actions {
-                        self.process_action(action);
+                } else {
+                    // Check if click is in the right sidebar region
+                    let rs_visible = self.right_sidebar.as_ref().map(|rs| rs.visible).unwrap_or(false);
+                    let rs_w = self.right_sidebar_width();
+                    let total_w = self.window.as_ref()
+                        .map(|w| w.inner_size().width as f32 / self.scale_factor)
+                        .unwrap_or(1200.0);
+                    let in_right_sidebar = rs_visible && lx > (total_w - rs_w) && ly > TOP_CHROME_HEIGHT;
+
+                    if in_right_sidebar
+                        && state == ElementState::Pressed
+                        && (button == MouseButton::Left || button == MouseButton::Right)
+                    {
+                        let is_right = button == MouseButton::Right;
+                        self.process_action(InputAction::RightSidebarClick {
+                            x: lx,
+                            y: ly,
+                            is_right_click: is_right,
+                        });
+                    } else if let Some(grid) = &self.grid {
+                        let panels = &self.panels;
+                        let panel_types = |pid: PanelId| -> Option<PanelType> {
+                            panels.iter().find(|p| p.id == pid).map(|p| p.panel_type)
+                        };
+                        let actions = match state {
+                            ElementState::Pressed => self.mouse_state.on_mouse_press(
+                                button,
+                                &self.dividers,
+                                grid,
+                                TOP_CHROME_HEIGHT,
+                                &panel_types,
+                                &self.modifiers,
+                            ),
+                            ElementState::Released => self.mouse_state.on_mouse_release(
+                                button,
+                                grid,
+                                TOP_CHROME_HEIGHT,
+                            ),
+                        };
+                        let actions: Vec<_> = actions;
+                        for action in actions {
+                            self.process_action(action);
+                        }
                     }
                 }
             }
@@ -4441,9 +4747,23 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 let lx = self.mouse_state.cursor_x as f32;
 
-                // If mouse is over sidebar, scroll sidebar instead of panels
-                let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
-                if sidebar_visible && lx < self.sidebar_width() {
+                // If mouse is over right sidebar, scroll right sidebar
+                let right_sidebar_visible = self.right_sidebar.as_ref().map(|rs| rs.visible).unwrap_or(false);
+                let rs_width = self.right_sidebar_width();
+                let win_w = self.window.as_ref()
+                    .map(|w| w.inner_size().width as f32 / self.scale_factor)
+                    .unwrap_or(1200.0);
+                if right_sidebar_visible && lx > (win_w - rs_width) {
+                    let pixel_delta = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => y * 21.0,
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                    };
+                    self.process_action(InputAction::RightSidebarScroll { delta: -pixel_delta });
+                } else if {
+                    // If mouse is over left sidebar, scroll sidebar instead of panels
+                    let sidebar_visible = self.sidebar.as_ref().map(|s| s.visible).unwrap_or(false);
+                    sidebar_visible && lx < self.sidebar_width()
+                } {
                     let pixel_delta = match delta {
                         winit::event::MouseScrollDelta::LineDelta(_, y) => y * 21.0,
                         winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
@@ -4712,6 +5032,10 @@ impl ApplicationHandler<UserEvent> for App {
                 );
                 for action in actions {
                     if matches!(action, InputAction::Quit) {
+                        // Shutdown heartbeat scheduler on quit
+                        if let Some(sched) = self.heartbeat_scheduler.take() {
+                            sched.shutdown();
+                        }
                         // Save config on quit (same logic as CloseRequested)
                         if let (Some(grid), Some(project_dir)) =
                             (&self.grid, &self.project_dir)
@@ -5121,6 +5445,124 @@ impl ApplicationHandler<UserEvent> for App {
             if self.toast_manager.count() != prev_count {
                 needs_render = true;
             }
+        }
+
+        // Drain heartbeat events into a local Vec to avoid borrow conflict (T-10-13)
+        let heartbeat_events: Vec<crate::heartbeat::HeartbeatEvent> = self.heartbeat_event_rx
+            .as_ref()
+            .map(|rx| {
+                let events: Vec<_> = rx.try_iter().take(100).collect();
+                if events.len() >= 100 {
+                    tracing::warn!("Heartbeat event drain hit 100-event cap (T-10-13 DoS mitigation)");
+                }
+                events
+            })
+            .unwrap_or_default();
+        let had_heartbeat_events = !heartbeat_events.is_empty();
+
+        for event in heartbeat_events {
+            match event {
+                crate::heartbeat::HeartbeatEvent::JobStarted { job_name } => {
+                    self.heartbeat_state.job_statuses.insert(job_name.clone(), crate::heartbeat::JobStatus::Running);
+                    self.heartbeat_state.running_count += 1;
+                    self.stats_bar.update_heartbeat(self.heartbeat_state.running_count, !self.heartbeat_state.jobs.is_empty());
+                    // Update cap state for running indicator
+                    for (_pid, cap_state) in &mut self.heartbeat_cap_states {
+                        if cap_state.job_name == job_name {
+                            cap_state.status = crate::heartbeat::JobStatus::Running;
+                        }
+                    }
+                }
+                crate::heartbeat::HeartbeatEvent::JobCompleted { result } => {
+                    let job_name = result.job_name.clone();
+                    let severity = result.severity;
+                    let prefs = crate::config::global::load_global_preferences();
+
+                    // Update state
+                    self.heartbeat_state.update_result(result.clone(), prefs.llm.heartbeat_retention);
+                    self.heartbeat_state.job_statuses.insert(job_name.clone(), crate::heartbeat::JobStatus::Idle);
+                    self.heartbeat_state.running_count = self.heartbeat_state.running_count.saturating_sub(1);
+                    self.stats_bar.update_heartbeat(self.heartbeat_state.running_count, true);
+
+                    // Update any open heartbeat cap for this job
+                    for (_panel_id, cap_state) in &mut self.heartbeat_cap_states {
+                        if cap_state.job_name == job_name {
+                            // Shift previous latest_result into history before replacing
+                            if let Some(prev) = cap_state.latest_result.take() {
+                                cap_state.history.insert(0, prev);
+                            }
+                            // Set new result as latest
+                            cap_state.latest_result = Some(result.clone());
+                            cap_state.status = crate::heartbeat::JobStatus::Idle;
+                        }
+                    }
+
+                    // Toast notification per D-05/HEARTBEAT-05
+                    let threshold = self.heartbeat_state.jobs.iter()
+                        .find(|j| j.name == job_name)
+                        .map(|j| j.severity_threshold)
+                        .unwrap_or(crate::heartbeat::Severity::Warning);
+                    let should_toast = match (severity, threshold) {
+                        (crate::heartbeat::Severity::Critical, _) => true,
+                        (crate::heartbeat::Severity::Warning, crate::heartbeat::Severity::Warning) => true,
+                        (crate::heartbeat::Severity::Warning, crate::heartbeat::Severity::Info) => true,
+                        (crate::heartbeat::Severity::Info, crate::heartbeat::Severity::Info) => true,
+                        _ => false,
+                    };
+                    if should_toast {
+                        let (toast_type, msg) = match severity {
+                            crate::heartbeat::Severity::Critical => (
+                                crate::toast::ToastType::Intervention,
+                                format!("Heartbeat: {} found a critical issue", job_name),
+                            ),
+                            crate::heartbeat::Severity::Warning => (
+                                crate::toast::ToastType::Info,
+                                format!("Heartbeat: {} flagged a warning", job_name),
+                            ),
+                            crate::heartbeat::Severity::Info => (
+                                crate::toast::ToastType::Info,
+                                format!("Heartbeat: {} completed", job_name),
+                            ),
+                        };
+                        let model_name = result.model.clone();
+                        self.toast_manager.add(
+                            toast_type,
+                            msg,
+                            Some(format!("via {}", model_name)),
+                            None, // No source panel -- heartbeat is ambient
+                            Some(format!("heartbeat_{}", job_name)),
+                            None,
+                            std::time::Duration::from_secs(if severity == crate::heartbeat::Severity::Critical { 8 } else { 3 }),
+                        );
+                    }
+                }
+                crate::heartbeat::HeartbeatEvent::JobFailed { job_name, error } => {
+                    self.heartbeat_state.job_statuses.insert(job_name.clone(), crate::heartbeat::JobStatus::Error(error));
+                    self.heartbeat_state.running_count = self.heartbeat_state.running_count.saturating_sub(1);
+                    self.stats_bar.update_heartbeat(self.heartbeat_state.running_count, true);
+                    // Update cap state for error display
+                    for (_pid, cap_state) in &mut self.heartbeat_cap_states {
+                        if cap_state.job_name == job_name {
+                            cap_state.status = self.heartbeat_state.job_statuses.get(&job_name)
+                                .cloned().unwrap_or(crate::heartbeat::JobStatus::Idle);
+                        }
+                    }
+                }
+                crate::heartbeat::HeartbeatEvent::HealthChanged { provider_healthy } => {
+                    tracing::info!("Heartbeat LLM provider health: {}", provider_healthy);
+                    // Update right sidebar state for D-10 guidance rendering
+                    if let Some(rs) = &mut self.right_sidebar {
+                        rs.heartbeat.provider_healthy = provider_healthy;
+                    }
+                }
+            }
+        }
+
+        if had_heartbeat_events {
+            if let Some(rs) = &mut self.right_sidebar {
+                rs.update_jobs(&self.heartbeat_state.jobs, &self.heartbeat_state.job_statuses, &self.heartbeat_state.results);
+            }
+            needs_render = true;
         }
 
         // Periodic intervention detection: send terminal texts to background monitor (D-05)
