@@ -55,7 +55,7 @@ pub struct Divider {
 ///
 /// Dividers are ordered deepest-first so that hit_test_divider returns
 /// the most specific (innermost) divider when multiple overlap in position.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DividerSet {
     pub dividers: Vec<Divider>,
 }

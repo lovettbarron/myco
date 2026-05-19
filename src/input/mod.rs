@@ -106,8 +106,6 @@ pub enum InputAction {
     SidebarResizeDrag { delta_pixels: f32 },
     /// Open file from sidebar.
     SidebarSelect { path: PathBuf },
-    /// Create new canvas from sidebar.
-    SidebarNewCanvas,
     /// Cycle focus to next panel.
     FocusNextPanel,
     /// Cycle focus to previous panel.

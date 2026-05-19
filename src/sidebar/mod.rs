@@ -18,6 +18,34 @@ pub const SIDEBAR_EDGE_HIT_ZONE: f32 = 4.0;
 /// Height of each file entry row (matches PANEL_TITLE_HEIGHT for visual consistency).
 const ENTRY_HEIGHT: f32 = 28.0;
 
+/// Height of the icon tab bar at the top of the sidebar.
+pub const TAB_BAR_HEIGHT: f32 = 32.0;
+
+/// Size of each tab icon hit zone.
+pub const TAB_ICON_SIZE: f32 = 28.0;
+
+/// Padding from the left edge for the first tab icon.
+pub const TAB_ICON_LEFT_PAD: f32 = 8.0;
+
+/// Gap between tab icons.
+pub const TAB_ICON_GAP: f32 = 4.0;
+
+/// Which tab is active in the sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidebarTab {
+    Files,
+    Search,
+}
+
+/// Result of a tab bar click hit test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabBarHit {
+    FilesTab,
+    SearchTab,
+    CloseButton,
+    None,
+}
+
 /// A single entry in the file tree.
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -57,6 +85,8 @@ pub struct SidebarState {
     pub show_git_directory: bool,
     /// Project-wide file search state.
     pub search: search::SearchState,
+    /// Which tab is currently active (Files or Search).
+    pub active_tab: SidebarTab,
 }
 
 impl SidebarState {
@@ -77,6 +107,7 @@ impl SidebarState {
             projects: Vec::new(),
             show_git_directory,
             search: search::SearchState::new(),
+            active_tab: SidebarTab::Files,
         };
         state.refresh_file_tree();
         state
@@ -201,19 +232,6 @@ impl SidebarState {
         }
     }
 
-    /// Create a new canvas file with timestamp name.
-    pub fn new_canvas(&self) -> Option<SidebarAction> {
-        let canvas_dir = self.project_dir.join(".myco").join("canvas");
-        let _ = std::fs::create_dir_all(&canvas_dir);
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let canvas_id = format!("canvas-{}", timestamp);
-        let path = canvas_dir.join(format!("{}.excalidraw", canvas_id));
-        Some(SidebarAction::CreateCanvas(canvas_id, path))
-    }
-
     /// Scroll the sidebar by delta pixels.
     pub fn scroll(&mut self, delta: f32, viewport_height: f32) {
         let total_height = self.entries.len() as f32 * ENTRY_HEIGHT;
@@ -225,7 +243,7 @@ impl SidebarState {
     /// Get entry index at a given y position within the sidebar viewport.
     pub fn entry_at_y(&self, y: f32) -> Option<usize> {
         let adjusted_y = y + self.scroll_offset;
-        let header_offset = 16.0 + 15.6 + 8.0; // top padding + "FILES" heading + gap
+        let header_offset = TAB_BAR_HEIGHT + 16.0 + 15.6 + 8.0; // tab bar + top padding + "FILES" heading + gap
         if adjusted_y < header_offset {
             return None;
         }
@@ -239,10 +257,9 @@ impl SidebarState {
 
     #[allow(dead_code)]
     pub fn content_height(&self) -> f32 {
-        let header = 16.0 + 15.6 + 8.0; // top padding + FILES heading + gap
+        let header = TAB_BAR_HEIGHT + 16.0 + 15.6 + 8.0; // tab bar + top padding + FILES heading + gap
         let entries = self.entries.len() as f32 * ENTRY_HEIGHT;
-        let footer = 8.0 + ENTRY_HEIGHT; // gap + "New Canvas" button
-        header + entries + footer
+        header + entries
     }
 
     /// Set the list of registered projects for the sidebar project switcher.
@@ -252,16 +269,60 @@ impl SidebarState {
 
     /// Whether the sidebar search mode is currently active.
     pub fn search_active(&self) -> bool {
-        self.search.active
+        self.active_tab == SidebarTab::Search
+    }
+
+    /// Switch to a specific tab, syncing search state.
+    pub fn set_tab(&mut self, tab: SidebarTab) {
+        self.active_tab = tab;
+        match tab {
+            SidebarTab::Files => {
+                if self.search.active {
+                    self.search.toggle();
+                }
+            }
+            SidebarTab::Search => {
+                if !self.search.active {
+                    self.search.toggle();
+                }
+            }
+        }
+    }
+
+    /// Hit test the tab bar area. `y` is relative to the sidebar viewport top.
+    pub fn tab_bar_hit_test(&self, x: f32, y: f32) -> TabBarHit {
+        if y > TAB_BAR_HEIGHT {
+            return TabBarHit::None;
+        }
+        let icon_y_pad = (TAB_BAR_HEIGHT - TAB_ICON_SIZE) / 2.0;
+        if y < icon_y_pad || y > icon_y_pad + TAB_ICON_SIZE {
+            return TabBarHit::None;
+        }
+        // Close button on the far right
+        let close_x = self.width - TAB_ICON_LEFT_PAD - TAB_ICON_SIZE;
+        if x >= close_x && x <= close_x + TAB_ICON_SIZE {
+            return TabBarHit::CloseButton;
+        }
+        // Files tab
+        let files_x = TAB_ICON_LEFT_PAD;
+        if x >= files_x && x <= files_x + TAB_ICON_SIZE {
+            return TabBarHit::FilesTab;
+        }
+        // Search tab
+        let search_x = TAB_ICON_LEFT_PAD + TAB_ICON_SIZE + TAB_ICON_GAP;
+        if x >= search_x && x <= search_x + TAB_ICON_SIZE {
+            return TabBarHit::SearchTab;
+        }
+        TabBarHit::None
     }
 
     /// Handle a click in search mode at the given y position within the sidebar viewport.
     /// Returns a SidebarAction if a match line for an openable file was clicked.
     pub fn search_click_at_y(&mut self, y: f32) -> Option<SidebarAction> {
-        if !self.search.active {
+        if !self.search_active() {
             return None;
         }
-        let header_offset = 16.0 + 15.6 + 8.0; // SEARCH header
+        let header_offset = TAB_BAR_HEIGHT + 16.0 + 15.6 + 8.0; // tab bar + SEARCH header
         let input_offset = header_offset + ENTRY_HEIGHT; // input box
         let count_offset = input_offset + ENTRY_HEIGHT; // results count
         let entries_start = count_offset;

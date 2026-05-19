@@ -58,22 +58,14 @@ impl CanvasManager {
         let file_path = canvas_dir.join(format!("{}.excalidraw", canvas_id));
         let state = CanvasState::new(canvas_id.to_string(), file_path.clone());
 
-        // Create webview with custom protocol and IPC
-        let webview = self.build_webview(window, bounds, panel_id, proxy)?;
+        // Load existing file content (if any) to inject via initialization script
+        let init_content = if file_path.exists() {
+            Some(std::fs::read_to_string(&file_path)?)
+        } else {
+            None
+        };
 
-        // If .excalidraw file exists, load it into the webview after Excalidraw initializes
-        if file_path.exists() {
-            let content = std::fs::read_to_string(&file_path)?;
-            let escaped = content
-                .replace('\\', "\\\\")
-                .replace('\'', "\\'")
-                .replace('\n', "\\n")
-                .replace('\r', "\\r");
-            let _ = webview.evaluate_script(&format!(
-                "(function tryLoad(){{if(window.__myco_load){{window.__myco_load('{}')}}else{{setTimeout(tryLoad,50)}}}})()",
-                escaped
-            ));
-        }
+        let webview = self.build_webview(window, bounds, panel_id, proxy, init_content.as_deref())?;
 
         self.canvases.insert(panel_id, state);
         self.webviews.insert(panel_id, webview);
@@ -87,9 +79,22 @@ impl CanvasManager {
         bounds: (f32, f32, f32, f32),
         panel_id: PanelId,
         proxy: EventLoopProxy<UserEvent>,
+        init_content: Option<&str>,
     ) -> Result<WebView, Box<dyn std::error::Error>> {
         use wry::{WebViewBuilder, Rect, dpi::{LogicalPosition, LogicalSize}};
         let (x, y, w, h) = bounds;
+
+        let init_script_tag = init_content.map(|content| {
+            let escaped = content
+                .replace('\\', "\\\\")
+                .replace('\'', "\\'")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
+            format!(
+                "<script>window.__myco_load_pending=true;window.__myco_init_data='{}';</script>",
+                escaped
+            )
+        });
 
         let webview = WebViewBuilder::new()
             .with_bounds(Rect {
@@ -99,6 +104,21 @@ impl CanvasManager {
             .with_custom_protocol("myco".into(), move |_webview_id, request| {
                 let path = request.uri().path();
                 let (content, mime) = assets::load_bundled_asset(path);
+
+                if (path == "/" || path == "/index.html") && init_script_tag.is_some() {
+                    let html = String::from_utf8_lossy(&content);
+                    let injected = html.replacen(
+                        "</head>",
+                        &format!("{}</head>", init_script_tag.as_deref().unwrap_or("")),
+                        1,
+                    );
+                    return http::Response::builder()
+                        .header("Content-Type", "text/html")
+                        .status(200)
+                        .body(Cow::from(injected.into_bytes()))
+                        .unwrap();
+                }
+
                 http::Response::builder()
                     .header("Content-Type", mime)
                     .status(200)
@@ -111,7 +131,7 @@ impl CanvasManager {
                 let _ = proxy.send_event(UserEvent::CanvasMessage(panel_id, msg));
             })
             .with_focused(false)
-            .with_navigation_handler(|url| url.starts_with("myco://")) // Allow custom protocol, block external (T-03-03)
+            .with_navigation_handler(|url| url.starts_with("myco://"))
             .build_as_child(window)?;
 
         Ok(webview)

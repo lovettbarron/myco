@@ -5,7 +5,7 @@ use crate::renderer::quad_renderer::QuadInstance;
 use crate::theme::{Theme, linear_to_srgb_u8};
 
 use super::search::SearchFlatEntry;
-use super::{SidebarState, ENTRY_HEIGHT_PX};
+use super::{SidebarState, SidebarTab, ENTRY_HEIGHT_PX, TAB_BAR_HEIGHT, TAB_ICON_GAP, TAB_ICON_LEFT_PAD, TAB_ICON_SIZE};
 
 /// Determine file text color based on extension.
 fn file_color_for_extension(path: &std::path::Path, theme: &Theme) -> [f32; 4] {
@@ -64,9 +64,45 @@ impl SidebarRenderer {
             _padding: 0.0,
         });
 
-        if state.search.active {
+        // --- Tab bar ---
+        let tab_bar_y = viewport_y;
+
+        // Tab bar bottom separator line
+        quads.push(QuadInstance {
+            position: [0.0, tab_bar_y + TAB_BAR_HEIGHT - 1.0],
+            size: [state.width, 1.0],
+            color: theme.border,
+            corner_radius: 0.0,
+            _padding: 0.0,
+        });
+
+        // Active tab highlight background
+        let icon_y_pad = (TAB_BAR_HEIGHT - TAB_ICON_SIZE) / 2.0;
+        let (active_x, _) = Self::tab_icon_position(state.active_tab);
+        quads.push(QuadInstance {
+            position: [active_x, tab_bar_y + icon_y_pad],
+            size: [TAB_ICON_SIZE, TAB_ICON_SIZE],
+            color: theme.sidebar_selected_bg,
+            corner_radius: 4.0,
+            _padding: 0.0,
+        });
+
+        // Close button background (subtle on hover — rendered always for now)
+        let close_x = state.width - TAB_ICON_LEFT_PAD - TAB_ICON_SIZE;
+        quads.push(QuadInstance {
+            position: [close_x, tab_bar_y + icon_y_pad],
+            size: [TAB_ICON_SIZE, TAB_ICON_SIZE],
+            color: [0.0, 0.0, 0.0, 0.0], // transparent by default
+            corner_radius: 4.0,
+            _padding: 0.0,
+        });
+
+        // Content area starts after tab bar
+        let content_y = viewport_y + TAB_BAR_HEIGHT;
+
+        if state.search_active() {
             // Search input box background
-            let input_y = viewport_y + 16.0 + 15.6 + 4.0;
+            let input_y = content_y + 16.0 + 15.6 + 4.0;
             quads.push(QuadInstance {
                 position: [8.0, input_y],
                 size: [state.width - 16.0, ENTRY_HEIGHT_PX],
@@ -78,7 +114,7 @@ impl SidebarRenderer {
             return quads;
         }
 
-        let header_offset = viewport_y + 16.0 + 15.6 + 8.0; // top padding + FILES heading + gap
+        let header_offset = content_y + 16.0 + 15.6 + 8.0;
 
         // Selected entry highlight
         if let Some(idx) = state.selected {
@@ -95,7 +131,7 @@ impl SidebarRenderer {
                 quads.push(QuadInstance {
                     position: [0.0, entry_y],
                     size: [2.0, ENTRY_HEIGHT_PX],
-                    color: theme.divider_hover, // accent color
+                    color: theme.divider_hover,
                     corner_radius: 0.0,
                     _padding: 0.0,
                 });
@@ -122,6 +158,17 @@ impl SidebarRenderer {
         quads
     }
 
+    /// Compute the x position for a tab icon.
+    fn tab_icon_position(tab: SidebarTab) -> (f32, f32) {
+        match tab {
+            SidebarTab::Files => (TAB_ICON_LEFT_PAD, TAB_ICON_LEFT_PAD + TAB_ICON_SIZE),
+            SidebarTab::Search => {
+                let x = TAB_ICON_LEFT_PAD + TAB_ICON_SIZE + TAB_ICON_GAP;
+                (x, x + TAB_ICON_SIZE)
+            }
+        }
+    }
+
     /// Build glyphon text buffers for sidebar entries.
     pub fn prepare_buffers(
         font_system: &mut FontSystem,
@@ -137,11 +184,18 @@ impl SidebarRenderer {
             return (buffers, metas);
         }
 
-        if state.search.active {
-            return Self::prepare_search_buffers(font_system, state, viewport_y, viewport_h, theme);
+        // --- Tab bar icon labels ---
+        Self::prepare_tab_bar_buffers(font_system, state, viewport_y, theme, &mut buffers, &mut metas);
+
+        if state.search_active() {
+            let (mut sb, mut sm) = Self::prepare_search_buffers(font_system, state, viewport_y, viewport_h, theme);
+            buffers.append(&mut sb);
+            metas.append(&mut sm);
+            return (buffers, metas);
         }
 
-        let header_y = viewport_y + 16.0;
+        let content_y = viewport_y + TAB_BAR_HEIGHT;
+        let header_y = content_y + 16.0;
 
         // "FILES" section header (12px semibold)
         let header_metrics = Metrics::new(12.0, 15.6);
@@ -150,7 +204,7 @@ impl SidebarRenderer {
         let header_attrs = Attrs::new()
             .family(Family::SansSerif)
             .weight(Weight::SEMIBOLD)
-            .color(GlyphonColor::rgb(98, 114, 164)); // #6272a4 Dracula comment
+            .color(GlyphonColor::rgb(98, 114, 164));
         let default_attrs = Attrs::new();
         header_buf.set_rich_text(
             font_system,
@@ -170,7 +224,7 @@ impl SidebarRenderer {
 
         // File entries
         let entries_start_y = header_y + 15.6 + 8.0;
-        let entry_metrics = Metrics::new(14.0, 21.0); // Body size
+        let entry_metrics = Metrics::new(14.0, 21.0);
 
         for (i, entry) in state.entries.iter().enumerate() {
             let entry_y =
@@ -181,9 +235,8 @@ impl SidebarRenderer {
                 continue;
             }
 
-            let indent = 16.0 + (entry.depth as f32 * 16.0); // 16px base + 16px per depth
+            let indent = 16.0 + (entry.depth as f32 * 16.0);
 
-            // Build display text with folder indicators
             let display_text = if entry.is_dir {
                 let indicator = if entry.expanded {
                     "\u{25BE}\u{FE0E} "
@@ -235,55 +288,115 @@ impl SidebarRenderer {
 
             metas.push(SidebarTextAreaMeta {
                 left: indent,
-                top: entry_y + 3.5, // vertically center in 28px row
+                top: entry_y + 3.5,
                 width: state.width - indent - 16.0,
                 height: ENTRY_HEIGHT_PX,
             });
             buffers.push(buf);
         }
 
-        // "New Canvas" button at bottom
-        let new_canvas_y = entries_start_y
-            + (state.entries.len() as f32 * ENTRY_HEIGHT_PX)
-            + 8.0
-            - state.scroll_offset;
-        if new_canvas_y < viewport_y + viewport_h {
-            let btn_attrs = Attrs::new()
-                .family(Family::SansSerif)
-                .weight(Weight::NORMAL)
-                .color(GlyphonColor::rgba(
-                    linear_to_srgb_u8(theme.divider_hover[0]),
-                    linear_to_srgb_u8(theme.divider_hover[1]),
-                    linear_to_srgb_u8(theme.divider_hover[2]),
-                    255,
-                ));
-
-            let mut btn_buf = Buffer::new(font_system, entry_metrics);
-            btn_buf.set_size(
-                font_system,
-                Some(state.width - 32.0),
-                Some(ENTRY_HEIGHT_PX),
-            );
-            let default_attrs = Attrs::new();
-            btn_buf.set_rich_text(
-                font_system,
-                [("New Canvas", btn_attrs)].into_iter(),
-                &default_attrs,
-                Shaping::Advanced,
-                None,
-            );
-            btn_buf.shape_until_scroll(font_system, false);
-
-            metas.push(SidebarTextAreaMeta {
-                left: 16.0,
-                top: new_canvas_y,
-                width: state.width - 32.0,
-                height: ENTRY_HEIGHT_PX,
-            });
-            buffers.push(btn_buf);
-        }
-
         (buffers, metas)
+    }
+
+    /// Build tab bar icon labels (files icon, search icon, close button).
+    fn prepare_tab_bar_buffers(
+        font_system: &mut FontSystem,
+        state: &SidebarState,
+        viewport_y: f32,
+        theme: &Theme,
+        buffers: &mut Vec<Buffer>,
+        metas: &mut Vec<SidebarTextAreaMeta>,
+    ) {
+        let icon_metrics = Metrics::new(16.0, 20.0);
+        let default_attrs = Attrs::new();
+        let icon_y_pad = (TAB_BAR_HEIGHT - TAB_ICON_SIZE) / 2.0;
+
+        let active_color = GlyphonColor::rgba(
+            linear_to_srgb_u8(theme.title_bar_text[0]),
+            linear_to_srgb_u8(theme.title_bar_text[1]),
+            linear_to_srgb_u8(theme.title_bar_text[2]),
+            255,
+        );
+        let inactive_color = GlyphonColor::rgba(
+            linear_to_srgb_u8(theme.fg_secondary[0]),
+            linear_to_srgb_u8(theme.fg_secondary[1]),
+            linear_to_srgb_u8(theme.fg_secondary[2]),
+            255,
+        );
+
+        // Files tab icon (U+2630 ☰ trigram — list/menu icon)
+        let files_color = if state.active_tab == SidebarTab::Files { active_color } else { inactive_color };
+        let (files_x, _) = Self::tab_icon_position(SidebarTab::Files);
+        let files_attrs = Attrs::new()
+            .family(Family::SansSerif)
+            .weight(Weight::NORMAL)
+            .color(files_color);
+        let mut files_buf = Buffer::new(font_system, icon_metrics);
+        files_buf.set_size(font_system, Some(TAB_ICON_SIZE), Some(TAB_ICON_SIZE));
+        files_buf.set_rich_text(
+            font_system,
+            [("\u{2630}", files_attrs)].into_iter(),
+            &default_attrs,
+            Shaping::Advanced,
+            None,
+        );
+        files_buf.shape_until_scroll(font_system, false);
+        metas.push(SidebarTextAreaMeta {
+            left: files_x + 6.0,
+            top: viewport_y + icon_y_pad + 4.0,
+            width: TAB_ICON_SIZE,
+            height: TAB_ICON_SIZE,
+        });
+        buffers.push(files_buf);
+
+        // Search tab icon (U+2315 ⌕ — telephone recorder, looks like magnifying glass)
+        let search_color = if state.active_tab == SidebarTab::Search { active_color } else { inactive_color };
+        let (search_x, _) = Self::tab_icon_position(SidebarTab::Search);
+        let search_attrs = Attrs::new()
+            .family(Family::SansSerif)
+            .weight(Weight::NORMAL)
+            .color(search_color);
+        let mut search_buf = Buffer::new(font_system, icon_metrics);
+        search_buf.set_size(font_system, Some(TAB_ICON_SIZE), Some(TAB_ICON_SIZE));
+        search_buf.set_rich_text(
+            font_system,
+            [("\u{2315}", search_attrs)].into_iter(),
+            &default_attrs,
+            Shaping::Advanced,
+            None,
+        );
+        search_buf.shape_until_scroll(font_system, false);
+        metas.push(SidebarTextAreaMeta {
+            left: search_x + 6.0,
+            top: viewport_y + icon_y_pad + 4.0,
+            width: TAB_ICON_SIZE,
+            height: TAB_ICON_SIZE,
+        });
+        buffers.push(search_buf);
+
+        // Close button (×)
+        let close_x = state.width - TAB_ICON_LEFT_PAD - TAB_ICON_SIZE;
+        let close_attrs = Attrs::new()
+            .family(Family::SansSerif)
+            .weight(Weight::NORMAL)
+            .color(inactive_color);
+        let mut close_buf = Buffer::new(font_system, icon_metrics);
+        close_buf.set_size(font_system, Some(TAB_ICON_SIZE), Some(TAB_ICON_SIZE));
+        close_buf.set_rich_text(
+            font_system,
+            [("\u{2715}", close_attrs)].into_iter(),
+            &default_attrs,
+            Shaping::Advanced,
+            None,
+        );
+        close_buf.shape_until_scroll(font_system, false);
+        metas.push(SidebarTextAreaMeta {
+            left: close_x + 6.0,
+            top: viewport_y + icon_y_pad + 4.0,
+            width: TAB_ICON_SIZE,
+            height: TAB_ICON_SIZE,
+        });
+        buffers.push(close_buf);
     }
 
     /// Build glyphon text buffers for search mode.
@@ -297,7 +410,8 @@ impl SidebarRenderer {
         let mut buffers = Vec::new();
         let mut metas = Vec::new();
 
-        let header_y = viewport_y + 16.0;
+        let content_y = viewport_y + TAB_BAR_HEIGHT;
+        let header_y = content_y + 16.0;
         let default_attrs = Attrs::new();
 
         // 1. "SEARCH" header (12px semibold)
@@ -307,7 +421,7 @@ impl SidebarRenderer {
         let header_attrs = Attrs::new()
             .family(Family::SansSerif)
             .weight(Weight::SEMIBOLD)
-            .color(GlyphonColor::rgb(98, 114, 164)); // #6272a4 Dracula comment
+            .color(GlyphonColor::rgb(98, 114, 164));
         header_buf.set_rich_text(
             font_system,
             [("SEARCH", header_attrs)].into_iter(),
@@ -488,8 +602,6 @@ impl SidebarRenderer {
                     let line_prefix = format!("{}: ", m.line_number);
                     let content = &m.line_content;
 
-                    // Build rich text spans: prefix in secondary, then content with
-                    // the matched portion highlighted in accent color
                     let mut spans: Vec<(&str, Attrs)> = Vec::new();
 
                     let prefix_attrs = Attrs::new()
@@ -498,14 +610,10 @@ impl SidebarRenderer {
                         .color(fg_secondary_color);
                     spans.push((line_prefix.as_str(), prefix_attrs));
 
-                    // Split content into before-match, match, after-match
-                    // match_start/match_end are byte positions from lowercase comparison
-                    // but content may have been trimmed. Use char-safe slicing.
                     let content_lower = content.to_lowercase();
                     let query_lower = state.search.query.to_lowercase();
                     if let Some(pos) = content_lower.find(&query_lower) {
                         let match_end = pos + query_lower.len();
-                        // Ensure we don't slice mid-char
                         let (before, rest) = safe_split_at(content, pos);
                         let (matched, after) = safe_split_at(rest, match_end - pos);
 
@@ -532,7 +640,6 @@ impl SidebarRenderer {
                             spans.push((after, after_attrs));
                         }
                     } else {
-                        // Fallback: no highlight
                         let normal_attrs = Attrs::new()
                             .family(Family::SansSerif)
                             .weight(Weight::NORMAL)
@@ -575,7 +682,6 @@ fn safe_split_at(s: &str, pos: usize) -> (&str, &str) {
     if pos >= s.len() {
         return (s, "");
     }
-    // Find the nearest valid char boundary at or after pos
     let mut boundary = pos;
     while boundary < s.len() && !s.is_char_boundary(boundary) {
         boundary += 1;

@@ -38,12 +38,17 @@ The project folder is the context surface. Sketch an idea on the canvas, it's a 
 - [ ] Top bar configurable statistics surface (token usage, active LLMs, projects running)
 - [ ] Background agentic contexts that run without an open cap
 - [ ] ~/.myco git sync (auto-pull on startup if git repo detected)
+- [ ] Code editor cap (GPU-rendered text editor with syntax highlighting, basic editing, file save — not a full IDE, but enough to edit files without leaving the workspace)
+- [ ] Git diff / code review cap (project-level diff viewer showing changed files, inline diffs, staged/unstaged state — Warp-style code review surface for reviewing AI-generated changes before committing)
+- [ ] Agentic heartbeat cap (periodic LLM-driven project health checks via Ollama/API — runs heartbeat jobs defined in .myco, surfaces results as ambient project intelligence)
+- [ ] Heartbeat job format (structured prompt + file input + expected output spec, stored in .myco project config)
+- [ ] LLM provider config in ~/.myco global config (Ollama endpoint, API keys, model selection)
 
 ### Out of Scope
 
 - Mobile or tablet version — desktop control surface only
 - Windows support in v1 — macOS first, Linux second, Windows deferred
-- Built-in LLM inference — myco monitors and surfaces agents, doesn't run them
+- Built-in LLM inference — myco orchestrates heartbeat queries to external LLM providers (Ollama, APIs) but does not bundle or run inference engines itself
 - Collaborative/multiplayer editing — single-user tool
 - Plugin marketplace — modularity is architectural, not ecosystem
 - Full IDE features (code completion, LSP, debugger) — the terminal cap runs your editor of choice

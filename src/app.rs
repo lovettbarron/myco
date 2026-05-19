@@ -1821,10 +1821,7 @@ impl App {
             }
             InputAction::ProjectSearchClose => {
                 if let Some(sidebar) = &mut self.sidebar {
-                    sidebar.search.active = false;
-                    sidebar.search.query.clear();
-                    sidebar.search.results.clear();
-                    sidebar.search.total_matches = 0;
+                    sidebar.set_tab(SidebarTab::Files);
                 }
             }
             InputAction::ToggleRightSidebar => {
@@ -4755,7 +4752,31 @@ impl ApplicationHandler<UserEvent> for App {
                     && button == MouseButton::Left
                 {
                     let sidebar_y = ly - TOP_CHROME_HEIGHT;
-                    // Handle sidebar click
+
+                    // Tab bar hit test (top 32px of sidebar)
+                    if sidebar_y < TAB_BAR_HEIGHT {
+                        if let Some(sidebar) = &mut self.sidebar {
+                            match sidebar.tab_bar_hit_test(lx, sidebar_y) {
+                                TabBarHit::FilesTab => {
+                                    sidebar.set_tab(SidebarTab::Files);
+                                }
+                                TabBarHit::SearchTab => {
+                                    sidebar.set_tab(SidebarTab::Search);
+                                }
+                                TabBarHit::CloseButton => {
+                                    sidebar.toggle();
+                                    self.recompute_layout();
+                                }
+                                TabBarHit::None => {}
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // Handle sidebar click (below tab bar)
                     if let Some(sidebar) = &mut self.sidebar {
                         // Search mode: route clicks to search results
                         if sidebar.search_active() {
@@ -5175,7 +5196,7 @@ impl ApplicationHandler<UserEvent> for App {
 
                 // Intercept keys when sidebar search is active
                 if let Some(sidebar) = &self.sidebar {
-                    if sidebar.search.active && event.state == ElementState::Pressed {
+                    if sidebar.search_active() && event.state == ElementState::Pressed {
                         use winit::keyboard::{Key, NamedKey};
                         let search_action = match &event.logical_key {
                             Key::Named(NamedKey::Escape) => Some(InputAction::ProjectSearchClose),
