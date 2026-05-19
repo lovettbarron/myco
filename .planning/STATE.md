@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 10-04-PLAN.md
-last_updated: "2026-05-19T02:27:35.796Z"
-last_activity: 2026-05-19
+stopped_at: context exhaustion at 75% (2026-05-19)
+last_updated: "2026-05-19T17:38:38.153Z"
+last_activity: 2026-05-19 - Completed quick task 260519-rb1: Add auto-open last project on start setting
 progress:
   total_phases: 10
   completed_phases: 9
@@ -144,6 +144,7 @@ None yet.
 | 260518-acs | Add Cap submenu to File menu with all panel types | 2026-05-18 | 0774c49 | [20260518-add-cap-submenu](./quick/20260518-add-cap-submenu/) |
 | 260518-t0k | Improve sidebar file browser: fix emoji chevrons, file-type color coding, hide .DS_Store | 2026-05-18 | f5afd46 | [260518-t0k-improve-sidebar-file-browser-to-match-wa](./quick/260518-t0k-improve-sidebar-file-browser-to-match-wa/) |
 | 260518-t5g | Add project-wide file search to sidebar (Cmd+Shift+F) with grouped results | 2026-05-18 | 5c29a06 | [260518-t5g-add-project-wide-file-search-to-sidebar-](./quick/260518-t5g-add-project-wide-file-search-to-sidebar-/) |
+| 260519-rb1 | Add auto-open last project on start setting to settings menu, off by default | 2026-05-19 | ac008f1 | [260519-rb1-add-auto-open-last-project-on-start-sett](./quick/260519-rb1-add-auto-open-last-project-on-start-sett/) |
 
 ### Blockers/Concerns
 
@@ -160,7 +161,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-19T02:26:00.000Z
-Stopped at: Completed 10-05-PLAN.md Tasks 1-2, awaiting human verification (Task 3)
+Last session: 2026-05-19T17:38:38.150Z
+Stopped at: context exhaustion at 75% (2026-05-19)
 Resume file: None
 Pending: Human verification of full heartbeat feature (Task 3 checkpoint)
