@@ -6,7 +6,6 @@
 //!
 //! Follows the same build_quads/build_labels pattern as agent_monitor/renderer.rs.
 
-use std::time::Instant;
 
 use crate::renderer::quad_renderer::QuadInstance;
 use crate::renderer::text_renderer::TextLabel;
@@ -114,7 +113,7 @@ pub fn build_quads(
 
     // Running state: pulsing dot
     if state.status == JobStatus::Running {
-        let elapsed = Instant::now().elapsed().as_secs_f32();
+        let elapsed = std::time::UNIX_EPOCH.elapsed().unwrap_or_default().as_secs_f32();
         let alpha = ((elapsed * 4.0).sin() * 0.35 + 0.65).clamp(0.3, 1.0);
         let dot_y = by + bh / 2.0 - DOT_SIZE / 2.0 - 12.0;
         let dot_x = bx + bw / 2.0 - DOT_SIZE / 2.0;

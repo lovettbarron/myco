@@ -127,6 +127,11 @@ pub fn load_jobs(project_dir: &Path) -> Vec<HeartbeatJob> {
             continue;
         }
 
+        if validate_job_name(&job.name).is_err() {
+            warn!("Job '{}' has invalid name (path traversal risk), skipping", job.name);
+            continue;
+        }
+
         jobs.push(job);
 
         // T-10-02: Max jobs limit
@@ -297,6 +302,11 @@ pub fn save_job(project_dir: &Path, job: &HeartbeatJob) -> Result<(), String> {
 /// The timestamp in the filename is sanitized to replace colons with dashes
 /// for filesystem compatibility.
 pub fn save_result(project_dir: &Path, result: &HeartbeatResult) {
+    if let Err(e) = validate_job_name(&result.job_name) {
+        warn!("Invalid job name in result, refusing to save: {}", e);
+        return;
+    }
+
     let results_dir = project_dir.join(".myco").join("heartbeats").join("results");
 
     if let Err(e) = std::fs::create_dir_all(&results_dir) {

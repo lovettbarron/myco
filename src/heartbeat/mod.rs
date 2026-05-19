@@ -30,7 +30,7 @@ pub enum Severity {
 
 impl Default for Severity {
     fn default() -> Self {
-        Severity::Warning
+        Severity::Info
     }
 }
 
