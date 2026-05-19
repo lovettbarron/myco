@@ -237,7 +237,7 @@ Plans:
 Plans:
 
 **Wave 1** *(foundation — parallel)*
-- [ ] 10-01-PLAN.md -- Core types, LLM client, job config, and prompt assembly (HeartbeatJob/Result/Severity structs, Ollama+Anthropic reqwest::blocking client, job JSON loader with security validation, template variable resolution, GlobalPreferences LlmConfig extension)
+- [x] 10-01-PLAN.md -- Core types, LLM client, job config, and prompt assembly (HeartbeatJob/Result/Severity structs, Ollama+Anthropic reqwest::blocking client, job JSON loader with security validation, template variable resolution, GlobalPreferences LlmConfig extension)
 - [ ] 10-02-PLAN.md -- Right sidebar framework and PanelType::Heartbeat (extensible RightSidebarState, HeartbeatBrowserState, PanelType::Heartbeat variant, InputAction extensions, GPU renderer stubs for sidebar and cap)
 
 **Wave 2** *(scheduler, depends on Wave 1)*
@@ -266,4 +266,4 @@ Note: Phase 10 (Agentic Heartbeat) depends on Phase 6+8 patterns. Research compl
 | 7. Testing Infrastructure | 3/3 | Complete | 2026-05-17 |
 | 8. Agent Monitor Cap | 3/3 | Complete | 2026-05-18 |
 | 9. Grid Layout Refactor | 3/3 | Complete | 2026-05-18 |
-| 10. Agentic Heartbeat Cap | 0/5 | Not started | - |
+| 10. Agentic Heartbeat Cap | 1/5 | In Progress|  |
