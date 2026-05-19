@@ -1442,23 +1442,6 @@ impl App {
                     _ => {}
                 }
             }
-            InputAction::SidebarNewCanvas => {
-                if let Some(sidebar) = &self.sidebar {
-                    if let Some(action) = sidebar.new_canvas() {
-                        match action {
-                            SidebarAction::CreateCanvas(canvas_id, _path) => {
-                                self.create_canvas_with_id(&canvas_id);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                // Refresh sidebar to show new file
-                if let Some(sidebar) = &mut self.sidebar {
-                    sidebar.refresh_file_tree();
-                }
-            }
-
             // === Focus cycling (Phase 3) ===
             InputAction::FocusNextPanel => {
                 if let Some(current) = self.focused_panel {
@@ -1803,8 +1786,10 @@ impl App {
                 }
             }
             InputAction::ProjectSearchToggle => {
+                tracing::info!("ProjectSearchToggle fired");
                 if let Some(sidebar) = &mut self.sidebar {
                     sidebar.search.toggle();
+                    tracing::info!("Search active: {}", sidebar.search.active);
                     if sidebar.search.active && !sidebar.visible {
                         sidebar.toggle();
                         self.recompute_layout();
@@ -1969,8 +1954,10 @@ impl App {
                 }
             }
             InputAction::OpenHeartbeatOutput { job_name } => {
-                // Open a new heartbeat cap via split (not singleton -- per D-04)
-                if let Some(focused_id) = self.focused_panel {
+                // Focus existing cap for this job if one is already open
+                if let Some((&existing_id, _)) = self.heartbeat_cap_states.iter().find(|(_, cs)| cs.job_name == job_name) {
+                    self.focused_panel = Some(existing_id);
+                } else if let Some(focused_id) = self.focused_panel {
                     if let Some(grid) = self.grid.as_mut() {
                         if let Some(new_id) = operations::split_panel(grid, focused_id, SplitDirection::Horizontal) {
                             let panel = Panel::new_heartbeat(new_id, job_name.clone());
@@ -4784,18 +4771,6 @@ impl ApplicationHandler<UserEvent> for App {
                                         self.create_canvas_with_id(&canvas_id);
                                     }
                                 }
-                            }
-                        } else {
-                            // Check if clicked on "New Canvas" button area
-                            let header_offset = 16.0 + 15.6 + 8.0;
-                            let entries_end = header_offset
-                                + (sidebar.entries.len() as f32 * crate::sidebar::ENTRY_HEIGHT_PX)
-                                + 8.0
-                                - sidebar.scroll_offset;
-                            if sidebar_y >= entries_end
-                                && sidebar_y <= entries_end + crate::sidebar::ENTRY_HEIGHT_PX
-                            {
-                                self.process_action(InputAction::SidebarNewCanvas);
                             }
                         }
                     }
