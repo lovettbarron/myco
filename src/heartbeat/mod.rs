@@ -7,6 +7,7 @@
 pub mod config;
 pub mod llm_client;
 pub mod prompt;
+pub mod renderer;
 
 use std::collections::HashMap;
 
