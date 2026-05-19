@@ -8,6 +8,7 @@ pub mod config;
 pub mod llm_client;
 pub mod prompt;
 pub mod renderer;
+pub mod scheduler;
 
 use std::collections::HashMap;
 
@@ -195,6 +196,32 @@ impl HeartbeatState {
             entry.truncate(retention);
         }
     }
+}
+
+/// Commands sent from the main thread to the heartbeat scheduler thread.
+#[derive(Debug)]
+pub enum SchedulerCommand {
+    /// Trigger immediate execution of the named job.
+    RunNow(String),
+    /// Replace the scheduler's job list with a new set.
+    ReloadJobs(Vec<HeartbeatJob>),
+    /// Update LLM configuration (rebuild provider).
+    UpdateConfig(crate::config::global::LlmConfig),
+    /// Shut down the scheduler thread cleanly.
+    Shutdown,
+}
+
+/// Events sent from the heartbeat scheduler thread to the main thread.
+#[derive(Debug, Clone)]
+pub enum HeartbeatEvent {
+    /// A job has started executing.
+    JobStarted { job_name: String },
+    /// A job completed successfully with a result.
+    JobCompleted { result: HeartbeatResult },
+    /// A job failed with an error.
+    JobFailed { job_name: String, error: String },
+    /// LLM provider health status changed.
+    HealthChanged { provider_healthy: bool },
 }
 
 #[cfg(test)]
