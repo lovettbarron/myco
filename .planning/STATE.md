@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-05-19T01:49:02.196Z"
+last_updated: "2026-05-19T01:56:09.707Z"
 last_activity: 2026-05-19
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 31
-  completed_plans: 31
+  completed_plans: 32
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 ## Current Position
 
 Phase: 10 (agentic-heartbeat-cap) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Completed: Phases 01-02, 04-09 (28/29 plans)
 Status: Ready to execute
 Last activity: 2026-05-19
@@ -64,6 +64,7 @@ Progress: [██████████] 100%
 | Phase 03 P03 | 15 min | 2 tasks | 6 files |
 | Phase 10 P01 | 8 | 2 tasks | 8 files |
 | Phase 10 P02 | 7 min | 2 tasks tasks | 9 files files |
+| Phase 10 P03 | 3 min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Combined Anthropic env var tests to prevent race conditions in parallel test execution
 - [Phase ?]: Manual Debug impl for LlmProvider redacts API key (T-10-01)
 - [Phase ?]: Right sidebar starts hidden; HeartbeatCapState decoupled from HeartbeatState; CapType::Heartbeat falls back to terminal on restore
+- [10-03]: Scheduler sends HeartbeatEvent via mpsc::Sender (not EventLoopProxy) -- Plan 04 bridge thread pattern
+- [10-03]: is_job_due and next_backoff extracted as standalone functions for testability
 
 ### Roadmap Evolution
 
@@ -149,7 +152,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-19T01:49:02.189Z
+Last session: 2026-05-19T01:56:09.700Z
 Stopped at: Completed 10-02-PLAN.md
 Resume file: None
 Pending: Commit Excalidraw migration, then execute Phase 03-03 or close milestone
