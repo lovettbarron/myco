@@ -4508,6 +4508,32 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
+                // Stats bar heartbeat click: clicking the HB slot opens/focuses right sidebar (D-17)
+                if state == ElementState::Pressed && button == MouseButton::Left {
+                    let lx = self.mouse_state.cursor_x as f32;
+                    let ly = self.mouse_state.cursor_y as f32;
+                    let sidebar_offset = self.sidebar_offset();
+                    let win_w = self.window.as_ref()
+                        .map(|w| w.inner_size().width as f32 / self.scale_factor)
+                        .unwrap_or(1200.0);
+                    let stats_bar_action = self.stats_bar.hit_test(
+                        lx, ly, TITLE_BAR_HEIGHT, sidebar_offset, win_w - sidebar_offset,
+                    );
+                    if stats_bar_action == crate::status_bar::StatsBarAction::OpenHeartbeatBrowser {
+                        // Open/focus right sidebar (not toggle -- per D-17 "opens/focuses")
+                        if let Some(rs) = &mut self.right_sidebar {
+                            if !rs.visible {
+                                rs.toggle();
+                                self.recompute_layout();
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                }
+
                 // Route mouse clicks to settings overlay when visible
                 if self.settings.visible
                     && state == ElementState::Pressed
@@ -5567,6 +5593,11 @@ impl ApplicationHandler<UserEvent> for App {
 
         // Periodic intervention detection: send terminal texts to background monitor (D-05)
         self.update_monitor_state();
+
+        // Heartbeat pulsing dot needs continuous redraw when jobs are running
+        if self.stats_bar.running_heartbeat {
+            needs_render = true;
+        }
 
         // Tooltip redraw (for delayed appearance)
         if let Some(ref tooltip) = self.tooltip_state {

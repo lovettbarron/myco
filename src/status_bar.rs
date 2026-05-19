@@ -25,11 +25,22 @@ pub struct StatsSlot {
     pub visible: bool,
 }
 
+/// Actions returned by stats bar click hit-testing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatsBarAction {
+    /// User clicked the heartbeat indicator slot -- open/focus right sidebar.
+    OpenHeartbeatBrowser,
+    /// No actionable click target hit.
+    None,
+}
+
 /// Stats bar state: configurable slots architecture (D-06).
 pub struct StatsBar {
     pub slots: Vec<StatsSlot>,
     /// Application start time for computing uptime.
     pub start_time: Instant,
+    /// Whether heartbeat jobs are actively running (drives pulsing dot animation).
+    pub running_heartbeat: bool,
 }
 
 impl StatsBar {
@@ -60,6 +71,7 @@ impl StatsBar {
                 },
             ],
             start_time: Instant::now(),
+            running_heartbeat: false,
         }
     }
 
@@ -73,8 +85,10 @@ impl StatsBar {
     /// Update the heartbeat indicator slot (index 2).
     ///
     /// Shows "HB: N running" or "HB: idle" when jobs exist; hides the slot
-    /// when no heartbeat jobs are configured.
+    /// when no heartbeat jobs are configured. Sets `running_heartbeat` for
+    /// pulsing dot animation (1.5 Hz per UI spec).
     pub fn update_heartbeat(&mut self, running: usize, has_jobs: bool) {
+        self.running_heartbeat = running > 0;
         if let Some(slot) = self.slots.get_mut(2) {
             if has_jobs {
                 slot.visible = true;
@@ -147,7 +161,77 @@ impl StatsBar {
             }
         }
 
+        // Pulsing dot for heartbeat running indicator (1.5 Hz per UI spec).
+        // Only visible when heartbeat slot (index 2) is visible AND jobs are running.
+        if self.running_heartbeat && self.slots.get(2).map(|s| s.visible).unwrap_or(false) {
+            // Find the heartbeat slot's position among visible slots
+            let visible_before_hb = self.slots.iter().take(2).filter(|s| s.visible).count();
+            let slot_width = stats_bar_w / visible_slots.len() as f32;
+            let hb_slot_x = stats_bar_x + slot_width * visible_before_hb as f32;
+
+            let t = self.start_time.elapsed().as_secs_f32();
+            let alpha = 0.4 + 0.6 * ((t * 3.0).sin() * 0.5 + 0.5);
+            let dot_x = hb_slot_x + 4.0; // 4px before the label text
+            let dot_y = stats_bar_y + (STATS_BAR_HEIGHT - 6.0) / 2.0;
+            quads.push(QuadInstance {
+                position: [dot_x, dot_y],
+                size: [6.0, 6.0],
+                color: [
+                    theme.divider_hover[0],
+                    theme.divider_hover[1],
+                    theme.divider_hover[2],
+                    alpha,
+                ],
+                corner_radius: 3.0,
+                _padding: 0.0,
+            });
+        }
+
         quads
+    }
+
+    /// Hit-test a click on the stats bar, returning an action if a clickable slot was hit.
+    ///
+    /// `x` and `y` are in window-local logical coordinates.
+    /// `stats_bar_y` is the top-y of the stats bar, `stats_bar_x` is the left-x,
+    /// and `stats_bar_w` is the total width.
+    pub fn hit_test(
+        &self,
+        x: f32,
+        y: f32,
+        stats_bar_y: f32,
+        stats_bar_x: f32,
+        stats_bar_w: f32,
+    ) -> StatsBarAction {
+        // Check if click is within the stats bar vertical bounds
+        if y < stats_bar_y || y > stats_bar_y + STATS_BAR_HEIGHT {
+            return StatsBarAction::None;
+        }
+        if x < stats_bar_x || x > stats_bar_x + stats_bar_w {
+            return StatsBarAction::None;
+        }
+
+        let visible_slots: Vec<(usize, &StatsSlot)> = self.slots.iter()
+            .enumerate()
+            .filter(|(_, s)| s.visible)
+            .collect();
+
+        if visible_slots.is_empty() {
+            return StatsBarAction::None;
+        }
+
+        let slot_width = stats_bar_w / visible_slots.len() as f32;
+        let relative_x = x - stats_bar_x;
+        let slot_index = (relative_x / slot_width) as usize;
+
+        if let Some(&(original_index, _)) = visible_slots.get(slot_index) {
+            // Slot index 2 is the heartbeat indicator
+            if original_index == 2 {
+                return StatsBarAction::OpenHeartbeatBrowser;
+            }
+        }
+
+        StatsBarAction::None
     }
 
     /// Build text labels for the stats bar slots.
