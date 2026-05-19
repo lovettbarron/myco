@@ -52,6 +52,194 @@ pub struct JobSummary {
     pub status: JobStatus,
 }
 
+/// Maximum buffer length for inline editor fields (T-10-18: DoS mitigation).
+const MAX_PROMPT_EDITOR_LEN: usize = 10_000;
+/// Maximum buffer length for file patterns / watch paths fields (T-10-18).
+const MAX_FIELD_EDITOR_LEN: usize = 2_000;
+/// Maximum buffer length for interval field (T-10-18).
+const MAX_INTERVAL_EDITOR_LEN: usize = 10;
+
+/// Active inline editor state for a single job. Per D-16, the sidebar
+/// expands to show editable fields below the selected job row.
+pub struct EditingState {
+    /// Index of the job being edited in job_summaries.
+    pub job_index: usize,
+    /// Which field is currently focused (0=prompt, 1=files, 2=interval, 3=watch_paths).
+    pub focused_field: usize,
+    /// Editable field buffers (cloned from job on edit start).
+    pub prompt: String,
+    /// Comma-separated file patterns.
+    pub files: String,
+    /// Numeric string for interval minutes.
+    pub interval_minutes: String,
+    /// Comma-separated watch paths.
+    pub watch_paths: String,
+    /// Cursor position within the focused field.
+    pub cursor_pos: usize,
+}
+
+impl EditingState {
+    /// Create an editing state from a heartbeat job at the given index.
+    pub fn from_job(index: usize, job: &crate::heartbeat::HeartbeatJob) -> Self {
+        Self {
+            job_index: index,
+            focused_field: 0,
+            prompt: job.prompt.clone(),
+            files: job.files.join(", "),
+            interval_minutes: job
+                .schedule
+                .interval_minutes
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "30".to_string()),
+            watch_paths: job.watch_paths.join(", "),
+            cursor_pos: 0,
+        }
+    }
+
+    /// Returns the currently focused field buffer as a mutable reference.
+    pub fn active_buffer_mut(&mut self) -> &mut String {
+        match self.focused_field {
+            0 => &mut self.prompt,
+            1 => &mut self.files,
+            2 => &mut self.interval_minutes,
+            3 => &mut self.watch_paths,
+            _ => &mut self.prompt,
+        }
+    }
+
+    /// Returns the max length for the currently focused field (T-10-18).
+    fn active_max_len(&self) -> usize {
+        match self.focused_field {
+            0 => MAX_PROMPT_EDITOR_LEN,
+            1 => MAX_FIELD_EDITOR_LEN,
+            2 => MAX_INTERVAL_EDITOR_LEN,
+            3 => MAX_FIELD_EDITOR_LEN,
+            _ => MAX_PROMPT_EDITOR_LEN,
+        }
+    }
+
+    /// Get the active buffer for the focused field (by value reference).
+    fn active_buffer(&self) -> &String {
+        match self.focused_field {
+            0 => &self.prompt,
+            1 => &self.files,
+            2 => &self.interval_minutes,
+            3 => &self.watch_paths,
+            _ => &self.prompt,
+        }
+    }
+
+    /// Apply a character input to the focused field at cursor position.
+    /// Respects per-field buffer length limits (T-10-18).
+    pub fn insert_char(&mut self, c: char) {
+        let max_len = self.active_max_len();
+        let cursor = self.cursor_pos;
+        let buf = match self.focused_field {
+            0 => &mut self.prompt,
+            1 => &mut self.files,
+            2 => &mut self.interval_minutes,
+            3 => &mut self.watch_paths,
+            _ => &mut self.prompt,
+        };
+        if buf.len() >= max_len {
+            return; // T-10-18: reject insert beyond limit
+        }
+        if cursor <= buf.len() {
+            buf.insert(cursor, c);
+            self.cursor_pos = cursor + c.len_utf8();
+        }
+    }
+
+    /// Delete character before cursor (Backspace).
+    pub fn backspace(&mut self) {
+        let cursor = self.cursor_pos;
+        if cursor > 0 {
+            let buf = match self.focused_field {
+                0 => &mut self.prompt,
+                1 => &mut self.files,
+                2 => &mut self.interval_minutes,
+                3 => &mut self.watch_paths,
+                _ => &mut self.prompt,
+            };
+            let prev = buf[..cursor]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            buf.remove(prev);
+            self.cursor_pos = prev;
+        }
+    }
+
+    /// Move cursor left.
+    pub fn cursor_left(&mut self) {
+        if self.cursor_pos > 0 {
+            let cursor = self.cursor_pos;
+            let buf = self.active_buffer();
+            self.cursor_pos = buf[..cursor]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+        }
+    }
+
+    /// Move cursor right.
+    pub fn cursor_right(&mut self) {
+        let cursor = self.cursor_pos;
+        let buf_len = self.active_buffer().len();
+        if cursor < buf_len {
+            let buf = self.active_buffer();
+            self.cursor_pos = buf[cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| cursor + i)
+                .unwrap_or(buf_len);
+        }
+    }
+
+    /// Move to next field (Tab).
+    pub fn next_field(&mut self) {
+        self.focused_field = (self.focused_field + 1) % 4;
+        let len = self.active_buffer().len();
+        self.cursor_pos = len; // cursor at end
+    }
+
+    /// Move to previous field (Shift+Tab).
+    pub fn prev_field(&mut self) {
+        self.focused_field = if self.focused_field == 0 {
+            3
+        } else {
+            self.focused_field - 1
+        };
+        let len = self.active_buffer().len();
+        self.cursor_pos = len;
+    }
+
+    /// Build a HeartbeatJob from the edited fields, using the original job as base.
+    pub fn to_job(
+        &self,
+        original: &crate::heartbeat::HeartbeatJob,
+    ) -> crate::heartbeat::HeartbeatJob {
+        let mut job = original.clone();
+        job.prompt = self.prompt.clone();
+        job.files = self
+            .files
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        job.schedule.interval_minutes = self.interval_minutes.parse().ok();
+        job.watch_paths = self
+            .watch_paths
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        job
+    }
+}
+
 /// State for the heartbeat browser tenant within the right sidebar.
 pub struct HeartbeatBrowserState {
     /// Lightweight summaries of all heartbeat jobs for rendering.
@@ -62,8 +250,8 @@ pub struct HeartbeatBrowserState {
     pub hovered: Option<usize>,
     /// Scroll offset for the job list.
     pub scroll_offset: f32,
-    /// Index of the job currently being edited (inline editor open).
-    pub editing: Option<usize>,
+    /// Active inline editor state per D-16. None when not editing.
+    pub editing: Option<EditingState>,
     /// Tracks whether the LLM provider (Ollama) is reachable. Per D-10,
     /// when false the sidebar shows setup guidance instead of job list.
     pub provider_healthy: bool,
@@ -107,6 +295,10 @@ pub enum RightSidebarAction {
     ToggleEnable(String),
     /// Open the inline editor for a job at the given index.
     EditJob(usize),
+    /// Save the current inline editor state to disk.
+    SaveEdit,
+    /// Cancel the current inline editor (discard changes).
+    CancelEdit,
     /// No action (click missed all targets).
     None,
 }
@@ -180,6 +372,34 @@ impl RightSidebarState {
         let (_, sidebar_y, _, _) = _bounds;
         let local_y = y - sidebar_y;
 
+        // When editing is active, check for clicks on Save/Cancel buttons
+        // and field focus changes within the edit section.
+        if let Some(ref mut editing) = self.heartbeat.editing {
+            let header_offset = 16.0 + 15.6 + 8.0;
+            let edit_row_y = header_offset + (editing.job_index as f32 * ENTRY_HEIGHT)
+                - self.heartbeat.scroll_offset
+                + ENTRY_HEIGHT; // starts below the job row
+
+            // Field rows: 4 fields * 28px each = 112px
+            let save_y = edit_row_y + 4.0 * ENTRY_HEIGHT;
+            let cancel_y = save_y + ENTRY_HEIGHT;
+            let edit_end_y = cancel_y + ENTRY_HEIGHT;
+
+            if local_y >= edit_row_y && local_y < edit_row_y + 4.0 * ENTRY_HEIGHT {
+                // Click on a field row: update focused_field
+                let field_index = ((local_y - edit_row_y) / ENTRY_HEIGHT) as usize;
+                if field_index < 4 {
+                    editing.focused_field = field_index;
+                    editing.cursor_pos = editing.active_buffer_mut().len();
+                }
+                return RightSidebarAction::None;
+            } else if local_y >= save_y && local_y < save_y + ENTRY_HEIGHT {
+                return RightSidebarAction::SaveEdit;
+            } else if local_y >= cancel_y && local_y < edit_end_y {
+                return RightSidebarAction::CancelEdit;
+            }
+        }
+
         if let Some(index) = self.entry_at_y(local_y) {
             self.heartbeat.selected = Some(index);
             if let Some(summary) = self.heartbeat.job_summaries.get(index) {
@@ -188,6 +408,23 @@ impl RightSidebarState {
         }
 
         RightSidebarAction::None
+    }
+
+    /// Enter edit mode for the selected job. Per D-16.
+    pub fn start_editing(&mut self, job: &crate::heartbeat::HeartbeatJob) {
+        if let Some(idx) = self.heartbeat.selected {
+            self.heartbeat.editing = Some(EditingState::from_job(idx, job));
+        }
+    }
+
+    /// Cancel editing and discard changes (Escape).
+    pub fn cancel_editing(&mut self) {
+        self.heartbeat.editing = None;
+    }
+
+    /// Returns true if the sidebar is currently in edit mode.
+    pub fn is_editing(&self) -> bool {
+        self.heartbeat.editing.is_some()
     }
 
     /// Refresh job summaries from live heartbeat data.

@@ -173,6 +173,104 @@ impl RightSidebarRenderer {
             });
         }
 
+        // Inline editor section (D-16): expanded below the selected job when editing
+        if let Some(ref editing) = state.heartbeat.editing {
+            if editing.job_index < MAX_VISIBLE_ROWS {
+                let edit_row_y = jobs_start_y
+                    + (editing.job_index as f32 * ENTRY_HEIGHT)
+                    - state.heartbeat.scroll_offset
+                    + ENTRY_HEIGHT; // below the job row
+
+                let edit_height = 4.0 * ENTRY_HEIGHT + 2.0 * ENTRY_HEIGHT + 16.0; // 4 fields + 2 buttons + padding
+
+                // Edit section background
+                quads.push(QuadInstance {
+                    position: [sidebar_x + 4.0, edit_row_y],
+                    size: [state.width - 8.0, edit_height],
+                    color: theme.bg_secondary,
+                    corner_radius: 4.0,
+                    _padding: 0.0,
+                });
+
+                // Field backgrounds and focus highlight
+                for field_idx in 0..4 {
+                    let field_y = edit_row_y + 8.0 + field_idx as f32 * ENTRY_HEIGHT;
+                    let field_x = sidebar_x + LEFT_PAD + 4.0;
+                    let field_w = state.width - LEFT_PAD - RIGHT_PAD - 8.0;
+
+                    // Slightly darker field background
+                    quads.push(QuadInstance {
+                        position: [field_x, field_y + 14.0],
+                        size: [field_w, 16.0],
+                        color: [
+                            theme.bg_secondary[0] * 0.85,
+                            theme.bg_secondary[1] * 0.85,
+                            theme.bg_secondary[2] * 0.85,
+                            1.0,
+                        ],
+                        corner_radius: 2.0,
+                        _padding: 0.0,
+                    });
+
+                    // Focused field border
+                    if editing.focused_field == field_idx {
+                        // Top edge
+                        quads.push(QuadInstance {
+                            position: [field_x, field_y + 14.0],
+                            size: [field_w, 1.0],
+                            color: theme.divider_hover,
+                            corner_radius: 0.0,
+                            _padding: 0.0,
+                        });
+                        // Bottom edge
+                        quads.push(QuadInstance {
+                            position: [field_x, field_y + 29.0],
+                            size: [field_w, 1.0],
+                            color: theme.divider_hover,
+                            corner_radius: 0.0,
+                            _padding: 0.0,
+                        });
+                        // Left edge
+                        quads.push(QuadInstance {
+                            position: [field_x, field_y + 14.0],
+                            size: [1.0, 16.0],
+                            color: theme.divider_hover,
+                            corner_radius: 0.0,
+                            _padding: 0.0,
+                        });
+                        // Right edge
+                        quads.push(QuadInstance {
+                            position: [field_x + field_w - 1.0, field_y + 14.0],
+                            size: [1.0, 16.0],
+                            color: theme.divider_hover,
+                            corner_radius: 0.0,
+                            _padding: 0.0,
+                        });
+
+                        // Cursor: 1px wide, 14px tall
+                        // Approximate cursor position based on character count * estimated char width
+                        let buf = match editing.focused_field {
+                            0 => &editing.prompt,
+                            1 => &editing.files,
+                            2 => &editing.interval_minutes,
+                            3 => &editing.watch_paths,
+                            _ => &editing.prompt,
+                        };
+                        let visible_text = &buf[..editing.cursor_pos.min(buf.len())];
+                        let char_width = 7.0_f32; // approximate monospace char width at 13px
+                        let cursor_x = field_x + 2.0 + (visible_text.len() as f32 * char_width).min(field_w - 4.0);
+                        quads.push(QuadInstance {
+                            position: [cursor_x, field_y + 15.0],
+                            size: [1.0, 14.0],
+                            color: theme.fg_primary,
+                            corner_radius: 0.0,
+                            _padding: 0.0,
+                        });
+                    }
+                }
+            }
+        }
+
         // Section divider at bottom of job list
         if !state.heartbeat.job_summaries.is_empty() {
             let divider_count = state.heartbeat.job_summaries.len().min(MAX_VISIBLE_ROWS);
@@ -396,6 +494,74 @@ impl RightSidebarRenderer {
                 font_size: 11.0,
                 color: enable_color,
             });
+
+            // Inline editor labels (D-16): render expanded editor below this job if editing
+            if let Some(ref editing) = state.heartbeat.editing {
+                if editing.job_index == i {
+                    let edit_row_y = entry_y + ENTRY_HEIGHT; // below the job row
+                    let field_labels = [
+                        ("Prompt:", &editing.prompt),
+                        ("Files:", &editing.files),
+                        ("Interval (min):", &editing.interval_minutes),
+                        ("Watch paths:", &editing.watch_paths),
+                    ];
+
+                    for (field_idx, (label_text, value)) in field_labels.iter().enumerate() {
+                        let field_y = edit_row_y + 8.0 + field_idx as f32 * ENTRY_HEIGHT;
+
+                        // Field label (11px, fg_secondary)
+                        labels.push(TextLabel {
+                            text: label_text.to_string(),
+                            x: sidebar_x + LEFT_PAD + 4.0,
+                            y: field_y,
+                            width: state.width - LEFT_PAD * 2.0,
+                            height: 14.3,
+                            font_size: 11.0,
+                            color: fg_secondary,
+                        });
+
+                        // Field value (13px, fg_primary) -- truncate for display
+                        let display_value = if value.len() > 40 {
+                            format!("{}...", &value[..37])
+                        } else {
+                            value.to_string()
+                        };
+                        labels.push(TextLabel {
+                            text: display_value,
+                            x: sidebar_x + LEFT_PAD + 4.0,
+                            y: field_y + 14.0,
+                            width: state.width - LEFT_PAD - RIGHT_PAD - 8.0,
+                            height: 16.9,
+                            font_size: 13.0,
+                            color: fg_primary,
+                        });
+                    }
+
+                    // Save button
+                    let save_y = edit_row_y + 8.0 + 4.0 * ENTRY_HEIGHT;
+                    labels.push(TextLabel {
+                        text: "Save".to_string(),
+                        x: sidebar_x + LEFT_PAD + 4.0,
+                        y: save_y + 5.0,
+                        width: 60.0,
+                        height: 16.9,
+                        font_size: 13.0,
+                        color: accent_color,
+                    });
+
+                    // Cancel button
+                    let cancel_y = save_y + ENTRY_HEIGHT;
+                    labels.push(TextLabel {
+                        text: "Cancel".to_string(),
+                        x: sidebar_x + LEFT_PAD + 4.0,
+                        y: cancel_y + 5.0,
+                        width: 60.0,
+                        height: 16.9,
+                        font_size: 13.0,
+                        color: fg_secondary,
+                    });
+                }
+            }
         }
 
         labels

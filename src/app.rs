@@ -1915,6 +1915,47 @@ impl App {
                             }
                         }
                     }
+                    crate::right_sidebar::RightSidebarAction::EditJob(index) => {
+                        if let Some(job) = self.heartbeat_state.jobs.get(index) {
+                            let job_clone = job.clone();
+                            if let Some(rs) = &mut self.right_sidebar {
+                                rs.heartbeat.selected = Some(index);
+                                rs.start_editing(&job_clone);
+                            }
+                        }
+                    }
+                    crate::right_sidebar::RightSidebarAction::SaveEdit => {
+                        // Save: build job from editing state, write to disk, reload
+                        let save_result = self.right_sidebar.as_ref().and_then(|rs| {
+                            let editing = rs.heartbeat.editing.as_ref()?;
+                            let original_job = self.heartbeat_state.jobs.get(editing.job_index)?;
+                            let updated_job = editing.to_job(original_job);
+                            Some(updated_job)
+                        });
+                        if let Some(updated_job) = save_result {
+                            if let Some(project_dir) = &self.project_dir {
+                                match crate::heartbeat::config::save_job(project_dir, &updated_job) {
+                                    Ok(()) => {
+                                        let jobs = crate::heartbeat::config::load_jobs(project_dir);
+                                        self.heartbeat_state.jobs = jobs.clone();
+                                        if let Some(sched) = &self.heartbeat_scheduler {
+                                            sched.reload_jobs(jobs);
+                                        }
+                                    }
+                                    Err(e) => tracing::warn!("Failed to save job: {}", e),
+                                }
+                            }
+                        }
+                        if let Some(rs) = &mut self.right_sidebar {
+                            rs.cancel_editing();
+                            rs.update_jobs(&self.heartbeat_state.jobs, &self.heartbeat_state.job_statuses, &self.heartbeat_state.results);
+                        }
+                    }
+                    crate::right_sidebar::RightSidebarAction::CancelEdit => {
+                        if let Some(rs) = &mut self.right_sidebar {
+                            rs.cancel_editing();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -5008,6 +5049,103 @@ impl ApplicationHandler<UserEvent> for App {
                         _ => {}
                     }
                     return;
+                }
+
+                // Intercept keys when right sidebar inline editor is active (D-16)
+                if event.state == ElementState::Pressed {
+                    let is_editing = self.right_sidebar.as_ref().map_or(false, |rs| rs.is_editing());
+                    if is_editing {
+                        use winit::keyboard::{Key, NamedKey};
+                        let mut consumed = true;
+                        match &event.logical_key {
+                            Key::Named(NamedKey::Escape) => {
+                                if let Some(rs) = &mut self.right_sidebar {
+                                    rs.cancel_editing();
+                                }
+                            }
+                            Key::Named(NamedKey::Enter) => {
+                                // Save: build job from editing state, write to disk, reload
+                                let save_result = self.right_sidebar.as_ref().and_then(|rs| {
+                                    let editing = rs.heartbeat.editing.as_ref()?;
+                                    let original_job = self.heartbeat_state.jobs.get(editing.job_index)?;
+                                    let updated_job = editing.to_job(original_job);
+                                    Some(updated_job)
+                                });
+                                if let Some(updated_job) = save_result {
+                                    if let Some(project_dir) = &self.project_dir {
+                                        match crate::heartbeat::config::save_job(project_dir, &updated_job) {
+                                            Ok(()) => {
+                                                let jobs = crate::heartbeat::config::load_jobs(project_dir);
+                                                self.heartbeat_state.jobs = jobs.clone();
+                                                if let Some(sched) = &self.heartbeat_scheduler {
+                                                    sched.reload_jobs(jobs);
+                                                }
+                                                tracing::info!("Saved job: {}", updated_job.name);
+                                            }
+                                            Err(e) => tracing::warn!("Failed to save job: {}", e),
+                                        }
+                                    }
+                                }
+                                if let Some(rs) = &mut self.right_sidebar {
+                                    rs.cancel_editing();
+                                    // Update sidebar summaries after save
+                                    rs.update_jobs(&self.heartbeat_state.jobs, &self.heartbeat_state.job_statuses, &self.heartbeat_state.results);
+                                }
+                            }
+                            Key::Named(NamedKey::Tab) => {
+                                if let Some(rs) = &mut self.right_sidebar {
+                                    if let Some(editing) = &mut rs.heartbeat.editing {
+                                        if self.modifiers.shift_key() {
+                                            editing.prev_field();
+                                        } else {
+                                            editing.next_field();
+                                        }
+                                    }
+                                }
+                            }
+                            Key::Named(NamedKey::Backspace) => {
+                                if let Some(rs) = &mut self.right_sidebar {
+                                    if let Some(editing) = &mut rs.heartbeat.editing {
+                                        editing.backspace();
+                                    }
+                                }
+                            }
+                            Key::Named(NamedKey::ArrowLeft) => {
+                                if let Some(rs) = &mut self.right_sidebar {
+                                    if let Some(editing) = &mut rs.heartbeat.editing {
+                                        editing.cursor_left();
+                                    }
+                                }
+                            }
+                            Key::Named(NamedKey::ArrowRight) => {
+                                if let Some(rs) = &mut self.right_sidebar {
+                                    if let Some(editing) = &mut rs.heartbeat.editing {
+                                        editing.cursor_right();
+                                    }
+                                }
+                            }
+                            Key::Character(ref c) => {
+                                if let Some(rs) = &mut self.right_sidebar {
+                                    if let Some(editing) = &mut rs.heartbeat.editing {
+                                        for ch in c.chars() {
+                                            if !ch.is_control() {
+                                                editing.insert_char(ch);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                consumed = false;
+                            }
+                        }
+                        if consumed {
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                            return;
+                        }
+                    }
                 }
 
                 // Intercept keys when the init prompt is showing
