@@ -40,7 +40,7 @@ use crate::renderer::text_renderer::TextLabel;
 use crate::renderer::Renderer;
 use crate::canvas::CanvasManager;
 use crate::markdown::{MarkdownManager, MarkdownRenderer};
-use crate::sidebar::{SidebarState, SidebarAction, SIDEBAR_EDGE_HIT_ZONE};
+use crate::sidebar::{SidebarState, SidebarAction, SidebarTab, TabBarHit, SIDEBAR_EDGE_HIT_ZONE, TAB_BAR_HEIGHT};
 use crate::sidebar::renderer::SidebarRenderer;
 use crate::config::registry::ProjectRegistry;
 use crate::picker::{PickerAction, PickerState};
@@ -1511,6 +1511,7 @@ impl App {
                 let prefs = crate::config::global::load_global_preferences();
                 self.settings.show_git_directory = prefs.show_git_directory;
                 self.settings.focus_follows_mouse = prefs.focus_follows_mouse;
+                self.settings.open_last_project = prefs.open_last_project;
                 if let Some(cm) = &self.canvas_manager {
                     for (_id, wv) in cm.webviews() {
                         let _ = wv.set_visible(false);
@@ -1788,11 +1789,14 @@ impl App {
             InputAction::ProjectSearchToggle => {
                 tracing::info!("ProjectSearchToggle fired");
                 if let Some(sidebar) = &mut self.sidebar {
-                    sidebar.search.toggle();
-                    tracing::info!("Search active: {}", sidebar.search.active);
-                    if sidebar.search.active && !sidebar.visible {
-                        sidebar.toggle();
-                        self.recompute_layout();
+                    if sidebar.search_active() {
+                        sidebar.set_tab(SidebarTab::Files);
+                    } else {
+                        sidebar.set_tab(SidebarTab::Search);
+                        if !sidebar.visible {
+                            sidebar.toggle();
+                            self.recompute_layout();
+                        }
                     }
                 }
             }
@@ -4029,7 +4033,28 @@ impl ApplicationHandler<UserEvent> for App {
         // D-10: Check for CLI argument (myco /path/to/project)
         let cli_project_dir = std::env::args().nth(1).map(std::path::PathBuf::from);
 
-        // Determine project directory: CLI arg or CWD
+        // Check auto-open-last-project preference when no CLI arg
+        let auto_open_dir = if cli_project_dir.is_none() {
+            let global_prefs = crate::config::global::load_global_preferences();
+            if global_prefs.open_last_project {
+                let mut candidates: Vec<_> = self.project_registry.projects.iter()
+                    .filter(|p| p.exists() && p.last_opened.is_some())
+                    .collect();
+                candidates.sort_by(|a, b| b.last_opened.cmp(&a.last_opened));
+                if let Some(last_project) = candidates.first() {
+                    info!("Auto-opening last project: {:?}", last_project.path);
+                    Some(last_project.path.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Determine project directory: CLI arg, auto-open, or CWD
         let project_dir = if let Some(ref cli_path) = cli_project_dir {
             if cli_path.exists() {
                 cli_path.clone()
@@ -4037,12 +4062,14 @@ impl ApplicationHandler<UserEvent> for App {
                 warn!("CLI path does not exist: {:?}, falling back to CWD", cli_path);
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
             }
+        } else if let Some(ref auto_path) = auto_open_dir {
+            auto_path.clone()
         } else {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
         };
 
-        // If no CLI argument, show picker instead of workspace (D-09)
-        if cli_project_dir.is_none() {
+        // If no CLI argument and no auto-open, show picker instead of workspace (D-09)
+        if cli_project_dir.is_none() && auto_open_dir.is_none() {
             info!("No CLI argument — showing project picker");
 
             // Apply global theme preferences for picker view
@@ -4069,8 +4096,8 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
 
-        // D-10: CLI argument present — open workspace directly, skip picker
-        info!("CLI argument present — opening workspace directly");
+        // D-10: CLI argument or auto-open present — open workspace directly, skip picker
+        info!("Opening workspace directly (cli={}, auto_open={})", cli_project_dir.is_some(), auto_open_dir.is_some());
         self.app_state = AppState::Workspace;
         self.project_dir = Some(project_dir.clone());
 
@@ -4675,8 +4702,12 @@ impl ApplicationHandler<UserEvent> for App {
                             prefs.focus_follows_mouse = enabled;
                             crate::config::global::save_global_preferences(&prefs);
                         }
-                        SettingsClickResult::OpenLastProjectToggled(_)
-                        | SettingsClickResult::ShortcutRecordingStarted
+                        SettingsClickResult::OpenLastProjectToggled(enabled) => {
+                            let mut prefs = crate::config::global::load_global_preferences();
+                            prefs.open_last_project = enabled;
+                            crate::config::global::save_global_preferences(&prefs);
+                        }
+                        SettingsClickResult::ShortcutRecordingStarted
                         | SettingsClickResult::SectionChanged
                         | SettingsClickResult::Consumed => {}
                     }
