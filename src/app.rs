@@ -539,6 +539,8 @@ impl App {
                     mm.destroy_markdown(&panel_id);
                 }
                 self.markdown_renderer.invalidate_panel_cache(&panel_id);
+                // Clean up heartbeat cap state if this is a heartbeat panel
+                self.heartbeat_cap_states.remove(&panel_id);
                 if let Some(grid) = self.grid.as_mut() {
                     if grid.panel_count() <= 1 {
                         // Last panel: transition to empty workspace
@@ -1884,8 +1886,34 @@ impl App {
                             sched.run_now(job_name);
                         }
                     }
-                    crate::right_sidebar::RightSidebarAction::ToggleEnable(_job_name) => {
-                        // Toggle enabled state -- deferred to future plan
+                    crate::right_sidebar::RightSidebarAction::ToggleEnable(job_name) => {
+                        if let Some(project_dir) = &self.project_dir {
+                            match crate::heartbeat::config::toggle_job_enabled(project_dir, &job_name) {
+                                Ok(new_enabled) => {
+                                    // Update local state
+                                    if let Some(job) = self.heartbeat_state.jobs.iter_mut().find(|j| j.name == job_name) {
+                                        job.enabled = new_enabled;
+                                    }
+                                    let status = if new_enabled {
+                                        crate::heartbeat::JobStatus::Idle
+                                    } else {
+                                        crate::heartbeat::JobStatus::Disabled
+                                    };
+                                    self.heartbeat_state.job_statuses.insert(job_name.clone(), status);
+                                    // Reload jobs in scheduler
+                                    if let Some(sched) = &self.heartbeat_scheduler {
+                                        sched.reload_jobs(self.heartbeat_state.jobs.clone());
+                                    }
+                                    // Update sidebar
+                                    if let Some(rs) = &mut self.right_sidebar {
+                                        rs.update_jobs(&self.heartbeat_state.jobs, &self.heartbeat_state.job_statuses, &self.heartbeat_state.results);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to toggle job: {}", e);
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -2273,8 +2301,12 @@ impl App {
                                 Panel::new_agent_monitor(pid)
                             }
                             crate::config::CapType::Heartbeat => {
-                                // Heartbeat caps are transient; fall back to terminal on restore.
-                                Panel::new_terminal(pid)
+                                if let Some(ref jn) = cap.job_name {
+                                    Panel::new_heartbeat(pid, jn.clone())
+                                } else {
+                                    // No job_name stored; fall back to terminal on restore.
+                                    Panel::new_terminal(pid)
+                                }
                             }
                         };
                         panels.push(panel);
@@ -2367,6 +2399,7 @@ impl App {
                     .expect("Failed to spawn heartbeat-bridge thread");
             }
 
+            let health_bridge_tx = bridge_tx.clone();
             let scheduler = crate::heartbeat::scheduler::HeartbeatScheduler::new(
                 bridge_tx,
                 project_dir,
@@ -2383,6 +2416,28 @@ impl App {
 
             // Update stats bar with initial heartbeat state
             self.stats_bar.update_heartbeat(0, !self.heartbeat_state.jobs.is_empty());
+
+            // Ollama auto-detection per D-10: spawn health check thread
+            let endpoint = prefs.llm.ollama.endpoint.clone();
+            let health_tx = health_bridge_tx;
+            std::thread::Builder::new()
+                .name("ollama-health-check".to_string())
+                .spawn(move || {
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(2))
+                        .build()
+                        .unwrap_or_default();
+                    let healthy = crate::heartbeat::llm_client::check_ollama_health(&client, &endpoint);
+                    let _ = health_tx.send(crate::heartbeat::HeartbeatEvent::HealthChanged {
+                        provider_healthy: healthy,
+                    });
+                    if healthy {
+                        tracing::info!("Ollama detected at {}", endpoint);
+                    } else {
+                        tracing::info!("Ollama not available at {} -- sidebar will show setup guidance per D-10", endpoint);
+                    }
+                })
+                .ok();
         }
 
         // Recompute grid now that sidebar is initialized (subtracts sidebar width)
@@ -4058,8 +4113,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 Panel::new_agent_monitor(pid)
                             }
                             crate::config::CapType::Heartbeat => {
-                                // Heartbeat caps are transient; fall back to terminal on restore.
-                                Panel::new_terminal(pid)
+                                if let Some(ref jn) = cap.job_name {
+                                    Panel::new_heartbeat(pid, jn.clone())
+                                } else {
+                                    // No job_name stored; fall back to terminal on restore.
+                                    Panel::new_terminal(pid)
+                                }
                             }
                         };
                         panels.push(panel);

@@ -1190,6 +1190,7 @@ fn split_node_to_tree_config(
                     cap_type: crate::config::CapType::Terminal,
                     file: None,
                     cwd: None,
+                    job_name: None,
                 }
             };
             TreeNodeConfig::Leaf { cap, weight: 1.0 }
@@ -1353,6 +1354,7 @@ mod tests {
                     cap_type: CapType::Terminal,
                     file: None,
                     cwd: None,
+                    job_name: None,
                 }),
             ],
         };
@@ -1379,11 +1381,13 @@ mod tests {
                     cap_type: CapType::Terminal,
                     file: None,
                     cwd: None,
+                    job_name: None,
                 }),
                 ColumnConfig::Single(CapConfig {
                     cap_type: CapType::Markdown,
                     file: Some("README.md".to_string()),
                     cwd: None,
+                    job_name: None,
                 }),
             ],
         };
@@ -1420,11 +1424,13 @@ mod tests {
                             cap_type: CapType::Terminal,
                             file: None,
                             cwd: None,
+                            job_name: None,
                         },
                         CapConfig {
                             cap_type: CapType::Markdown,
                             file: Some("notes.md".to_string()),
                             cwd: None,
+                            job_name: None,
                         },
                     ],
                 },

@@ -156,7 +156,8 @@ pub fn ensure_heartbeats_dir(project_dir: &Path) {
     if !readme_path.exists() {
         let readme = r#"# Heartbeat Jobs
 
-Place heartbeat job definitions here as `.json` files.
+Place JSON job files in this directory. Each file defines a heartbeat job
+that runs periodically against your project files.
 
 ## Job Format
 
@@ -164,19 +165,19 @@ Place heartbeat job definitions here as `.json` files.
 {
   "name": "my-check",
   "enabled": true,
-  "prompt": "Review {{file_contents}} for issues.\n\nBegin with [CRITICAL], [WARNING], or [INFO].",
-  "files": ["src/**/*.rs"],
+  "prompt": "Review these files for issues.\n\nFiles:\n{{file_contents}}\n\nBegin with [CRITICAL], [WARNING], or [INFO].",
+  "files": ["src/**/*.rs", "Cargo.toml"],
   "max_files": 50,
   "max_bytes": 100000,
   "schedule": { "type": "interval", "interval_minutes": 30 },
   "watch_paths": [],
-  "severity_threshold": "Warning"
+  "severity_threshold": "WARNING"
 }
 ```
 
 ## Template Variables
 
-- `{{file_contents}}` - Contents of matched files
+- `{{file_contents}}` - Contents of matched files, each prefixed with `--- filename ---`
 - `{{file_list}}` - Newline-separated list of matched file paths
 - `{{project_name}}` - Project directory name
 - `{{file_count}}` - Number of matched files
@@ -184,16 +185,110 @@ Place heartbeat job definitions here as `.json` files.
 
 ## Schedule Types
 
-- `"interval"` - Run every N minutes (requires `interval_minutes`)
-- `"on_demand"` - Run only when manually triggered
-- `"file_change"` - Run when `watch_paths` files change
+- `interval` - Runs every N minutes (set `interval_minutes`)
+- `on_demand` - Only runs when you click "Run Now" in the sidebar
+- `file_change` - Runs when files in `watch_paths` change
 
-Results are stored in the `results/` subdirectory.
+## Severity Tags
+
+Instruct the LLM to prefix its response with `[CRITICAL]`, `[WARNING]`, or `[INFO]`.
+Set `severity_threshold` to control which levels trigger toast notifications.
+
+Results are stored in `results/` with configurable retention (default: 10 per job).
 "#;
         if let Err(e) = std::fs::write(&readme_path, readme) {
             warn!("Failed to write heartbeats README: {}", e);
         }
     }
+}
+
+/// Validate a job name for safe filesystem use (T-10-16).
+///
+/// Rejects names containing path separators (`/`, `\`) or `..` to prevent
+/// path traversal attacks when constructing file paths.
+fn validate_job_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Job name cannot be empty".to_string());
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(format!(
+            "Job name '{}' contains invalid characters (path separators or '..')",
+            name
+        ));
+    }
+    Ok(())
+}
+
+/// Toggle a heartbeat job's enabled state on disk.
+///
+/// Reads the job JSON file, flips the `enabled` field (defaulting to `true`
+/// if absent), and writes it back atomically (tmp + rename).
+///
+/// Returns the new enabled state on success.
+///
+/// Security: validates job_name does not contain path separators (T-10-16).
+pub fn toggle_job_enabled(project_dir: &Path, job_name: &str) -> Result<bool, String> {
+    validate_job_name(job_name)?;
+
+    let heartbeats_dir = project_dir.join(".myco").join("heartbeats");
+    let file_path = heartbeats_dir.join(format!("{}.json", job_name));
+
+    if !file_path.exists() {
+        return Err(format!("Job file not found: {}", file_path.display()));
+    }
+
+    let contents = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read job file: {}", e))?;
+
+    let mut value: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse job file: {}", e))?;
+
+    let new_enabled = match value.get("enabled") {
+        Some(serde_json::Value::Bool(b)) => !b,
+        _ => false, // If missing or not bool, toggle to false (was implicitly true)
+    };
+
+    value["enabled"] = serde_json::Value::Bool(new_enabled);
+
+    let json = serde_json::to_string_pretty(&value)
+        .map_err(|e| format!("Failed to serialize job: {}", e))?;
+
+    // Atomic write: tmp file + rename
+    let tmp_path = heartbeats_dir.join(format!(".{}.json.tmp", job_name));
+    std::fs::write(&tmp_path, &json)
+        .map_err(|e| format!("Failed to write tmp file: {}", e))?;
+    std::fs::rename(&tmp_path, &file_path)
+        .map_err(|e| format!("Failed to rename tmp file: {}", e))?;
+
+    Ok(new_enabled)
+}
+
+/// Save a heartbeat job definition to disk.
+///
+/// Serializes the job to pretty-printed JSON and writes it atomically
+/// (tmp + rename) to `.myco/heartbeats/{job.name}.json`.
+///
+/// Security: validates job.name does not contain path separators (T-10-16).
+pub fn save_job(project_dir: &Path, job: &HeartbeatJob) -> Result<(), String> {
+    validate_job_name(&job.name)?;
+
+    let heartbeats_dir = project_dir.join(".myco").join("heartbeats");
+    if let Err(e) = std::fs::create_dir_all(&heartbeats_dir) {
+        return Err(format!("Failed to create heartbeats directory: {}", e));
+    }
+
+    let file_path = heartbeats_dir.join(format!("{}.json", job.name));
+    let json = serde_json::to_string_pretty(job)
+        .map_err(|e| format!("Failed to serialize job: {}", e))?;
+
+    // Atomic write: tmp file + rename
+    let tmp_path = heartbeats_dir.join(format!(".{}.json.tmp", job.name));
+    std::fs::write(&tmp_path, &json)
+        .map_err(|e| format!("Failed to write tmp file: {}", e))?;
+    std::fs::rename(&tmp_path, &file_path)
+        .map_err(|e| format!("Failed to rename tmp file: {}", e))?;
+
+    Ok(())
 }
 
 /// Save a heartbeat result to disk.
@@ -665,6 +760,137 @@ mod tests {
 
         let remaining = load_results(tmp.path(), "test-job", 10);
         assert_eq!(remaining.len(), 2);
+    }
+
+    #[test]
+    fn test_toggle_job_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let heartbeats_dir = tmp.path().join(".myco").join("heartbeats");
+        std::fs::create_dir_all(&heartbeats_dir).unwrap();
+
+        let job_json = r#"{
+            "name": "toggle-test",
+            "enabled": true,
+            "prompt": "Check",
+            "files": ["*.rs"],
+            "schedule": { "type": "on_demand" }
+        }"#;
+        std::fs::write(heartbeats_dir.join("toggle-test.json"), job_json).unwrap();
+
+        // Toggle: true -> false
+        let result = toggle_job_enabled(tmp.path(), "toggle-test");
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // now false
+
+        // Toggle: false -> true
+        let result = toggle_job_enabled(tmp.path(), "toggle-test");
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // now true
+    }
+
+    #[test]
+    fn test_toggle_job_enabled_rejects_path_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(toggle_job_enabled(tmp.path(), "../etc/passwd").is_err());
+        assert!(toggle_job_enabled(tmp.path(), "foo/bar").is_err());
+        assert!(toggle_job_enabled(tmp.path(), "foo\\bar").is_err());
+        assert!(toggle_job_enabled(tmp.path(), "").is_err());
+    }
+
+    #[test]
+    fn test_toggle_job_enabled_nonexistent_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let heartbeats_dir = tmp.path().join(".myco").join("heartbeats");
+        std::fs::create_dir_all(&heartbeats_dir).unwrap();
+
+        let result = toggle_job_enabled(tmp.path(), "nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_job() {
+        let tmp = tempfile::tempdir().unwrap();
+        let heartbeats_dir = tmp.path().join(".myco").join("heartbeats");
+        std::fs::create_dir_all(&heartbeats_dir).unwrap();
+
+        let job = crate::heartbeat::HeartbeatJob {
+            name: "save-test".to_string(),
+            enabled: true,
+            prompt: "Test prompt".to_string(),
+            files: vec!["*.rs".to_string()],
+            max_files: 50,
+            max_bytes: 100_000,
+            schedule: crate::heartbeat::JobSchedule {
+                schedule_type: "on_demand".to_string(),
+                interval_minutes: None,
+            },
+            watch_paths: vec![],
+            provider_override: None,
+            model_override: None,
+            severity_threshold: Severity::Warning,
+        };
+
+        let result = save_job(tmp.path(), &job);
+        assert!(result.is_ok());
+
+        // Verify file was written
+        let file_path = heartbeats_dir.join("save-test.json");
+        assert!(file_path.exists());
+
+        // Verify it can be loaded back
+        let loaded = load_jobs(tmp.path());
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "save-test");
+        assert_eq!(loaded[0].prompt, "Test prompt");
+    }
+
+    #[test]
+    fn test_save_job_rejects_path_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let job = crate::heartbeat::HeartbeatJob {
+            name: "../evil".to_string(),
+            enabled: true,
+            prompt: "".to_string(),
+            files: vec![],
+            max_files: 50,
+            max_bytes: 100_000,
+            schedule: crate::heartbeat::JobSchedule {
+                schedule_type: "on_demand".to_string(),
+                interval_minutes: None,
+            },
+            watch_paths: vec![],
+            provider_override: None,
+            model_override: None,
+            severity_threshold: Severity::Warning,
+        };
+
+        let result = save_job(tmp.path(), &job);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_job_name() {
+        assert!(validate_job_name("my-check").is_ok());
+        assert!(validate_job_name("check_01").is_ok());
+        assert!(validate_job_name("").is_err());
+        assert!(validate_job_name("../etc").is_err());
+        assert!(validate_job_name("foo/bar").is_err());
+        assert!(validate_job_name("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn test_ensure_heartbeats_dir_enhanced_readme() {
+        let tmp = tempfile::tempdir().unwrap();
+        ensure_heartbeats_dir(tmp.path());
+
+        let readme = std::fs::read_to_string(
+            tmp.path().join(".myco").join("heartbeats").join("README.md")
+        ).unwrap();
+        assert!(readme.contains("Heartbeat Jobs"));
+        assert!(readme.contains("{{file_contents}}"));
+        assert!(readme.contains("Severity Tags"));
+        assert!(readme.contains("[CRITICAL]"));
+        assert!(readme.contains("on_demand"));
     }
 
     #[test]

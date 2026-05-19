@@ -68,6 +68,9 @@ pub struct CapConfig {
     /// Working directory relative to project root (for terminal caps).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// Job name for heartbeat caps (so they remember which job to display across sessions).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_name: Option<String>,
 }
 
 /// The type of cap (panel content).
@@ -149,6 +152,7 @@ impl ProjectConfig {
                 cap_type: CapType::Terminal,
                 file: None,
                 cwd: None,
+                job_name: None,
             }));
         }
 
@@ -199,6 +203,7 @@ impl ProjectConfig {
                     cap_type: CapType::Terminal,
                     file: None,
                     cwd,
+                    job_name: None,
                 }
             }
             PanelType::Canvas => {
@@ -210,6 +215,7 @@ impl ProjectConfig {
                     cap_type: CapType::Canvas,
                     file,
                     cwd: None,
+                    job_name: None,
                 }
             }
             PanelType::Markdown => {
@@ -221,22 +227,30 @@ impl ProjectConfig {
                     cap_type: CapType::Markdown,
                     file,
                     cwd: None,
+                    job_name: None,
                 }
             }
             PanelType::AgentMonitor => CapConfig {
                 cap_type: CapType::AgentMonitor,
                 file: None,
                 cwd: None,
+                job_name: None,
             },
-            PanelType::Heartbeat => CapConfig {
-                cap_type: CapType::Heartbeat,
-                file: None,
-                cwd: None,
-            },
+            PanelType::Heartbeat => {
+                // Extract job_name from panel title "HB: {name}"
+                let hb_job_name = panel.title.strip_prefix("HB: ").map(|s| s.to_string());
+                CapConfig {
+                    cap_type: CapType::Heartbeat,
+                    file: None,
+                    cwd: None,
+                    job_name: hb_job_name,
+                }
+            }
             PanelType::Placeholder => CapConfig {
                 cap_type: CapType::Terminal,
                 file: None,
                 cwd: None,
+                job_name: None,
             },
         }
     }
@@ -299,11 +313,13 @@ mod tests {
                         cap_type: CapType::Terminal,
                         file: None,
                         cwd: Some(".".to_string()),
+                        job_name: None,
                     }),
                     ColumnConfig::Single(CapConfig {
                         cap_type: CapType::Markdown,
                         file: Some("docs/README.md".to_string()),
                         cwd: None,
+                        job_name: None,
                     }),
                 ],
             },
@@ -351,6 +367,7 @@ mod tests {
             cap_type: CapType::Terminal,
             file: None,
             cwd: Some("src".to_string()),
+            job_name: None,
         });
 
         let json = serde_json::to_string(&single).unwrap();
@@ -373,11 +390,13 @@ mod tests {
                     cap_type: CapType::Terminal,
                     file: None,
                     cwd: None,
+                    job_name: None,
                 },
                 CapConfig {
                     cap_type: CapType::Markdown,
                     file: Some("notes.md".to_string()),
                     cwd: None,
+                    job_name: None,
                 },
             ],
         };
@@ -424,6 +443,7 @@ mod tests {
                     cap_type: CapType::Markdown,
                     file: Some("docs/plan.md".to_string()),
                     cwd: None,
+                    job_name: None,
                 })],
             },
             tree_layout: None,
@@ -466,6 +486,7 @@ mod tests {
                     cap_type: CapType::Terminal,
                     file: None,
                     cwd: None,
+                    job_name: None,
                 })],
             },
             tree_layout: None,
@@ -488,6 +509,7 @@ mod tests {
                 cap_type: CapType::Terminal,
                 file: None,
                 cwd: Some(".".to_string()),
+                job_name: None,
             },
             weight: 1.0,
         };
@@ -516,6 +538,7 @@ mod tests {
                         cap_type: CapType::Terminal,
                         file: None,
                         cwd: None,
+                        job_name: None,
                     },
                     weight: 0.5,
                 },
@@ -524,6 +547,7 @@ mod tests {
                         cap_type: CapType::Markdown,
                         file: Some("README.md".to_string()),
                         cwd: None,
+                        job_name: None,
                     },
                     weight: 0.5,
                 },
@@ -556,6 +580,7 @@ mod tests {
                         cap_type: CapType::Terminal,
                         file: None,
                         cwd: None,
+                        job_name: None,
                     },
                     weight: 1.0,
                 },
@@ -567,6 +592,7 @@ mod tests {
                                 cap_type: CapType::Terminal,
                                 file: None,
                                 cwd: None,
+                                job_name: None,
                             },
                             weight: 0.5,
                         },
@@ -575,6 +601,7 @@ mod tests {
                                 cap_type: CapType::Canvas,
                                 file: Some(".myco/canvas/sketch.excalidraw".to_string()),
                                 cwd: None,
+                                job_name: None,
                             },
                             weight: 0.5,
                         },
