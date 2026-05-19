@@ -384,7 +384,9 @@ impl App {
             | InputAction::CanvasZoom { panel_id, .. }
             | InputAction::CanvasIpcMessage { panel_id, .. }
             | InputAction::AgentMonitorScroll { panel_id, .. }
-            | InputAction::AgentMonitorClick { panel_id, .. } => {
+            | InputAction::AgentMonitorClick { panel_id, .. }
+            | InputAction::HeartbeatScroll { panel_id, .. }
+            | InputAction::HeartbeatClick { panel_id, .. } => {
                 if self.panels.iter().any(|p| p.id == *panel_id && p.frozen) {
                     return; // Block input to frozen panels
                 }
@@ -1817,6 +1819,30 @@ impl App {
                     sidebar.search.total_matches = 0;
                 }
             }
+            InputAction::ToggleRightSidebar => {
+                // Right sidebar toggle -- wiring in Plan 05.
+            }
+            InputAction::HeartbeatScroll { .. } => {
+                // Heartbeat cap scroll -- wiring in Plan 05.
+            }
+            InputAction::HeartbeatClick { .. } => {
+                // Heartbeat cap click -- wiring in Plan 05.
+            }
+            InputAction::RightSidebarScroll { .. } => {
+                // Right sidebar scroll -- wiring in Plan 05.
+            }
+            InputAction::RightSidebarClick { .. } => {
+                // Right sidebar click -- wiring in Plan 05.
+            }
+            InputAction::RightSidebarResizeDrag { .. } => {
+                // Right sidebar resize -- wiring in Plan 05.
+            }
+            InputAction::OpenHeartbeatOutput { .. } => {
+                // Open heartbeat output cap -- wiring in Plan 05.
+            }
+            InputAction::HeartbeatRunNow { .. } => {
+                // Trigger heartbeat job run -- wiring in Plan 05.
+            }
             InputAction::Quit => {
                 // Handled in window_event before reaching process_action.
                 // This arm exists only for exhaustive match coverage.
@@ -2151,6 +2177,10 @@ impl App {
                             }
                             crate::config::CapType::AgentMonitor => {
                                 Panel::new_agent_monitor(pid)
+                            }
+                            crate::config::CapType::Heartbeat => {
+                                // Heartbeat caps are transient; fall back to terminal on restore.
+                                Panel::new_terminal(pid)
                             }
                         };
                         panels.push(panel);
@@ -3791,6 +3821,10 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             crate::config::CapType::AgentMonitor => {
                                 Panel::new_agent_monitor(pid)
+                            }
+                            crate::config::CapType::Heartbeat => {
+                                // Heartbeat caps are transient; fall back to terminal on restore.
+                                Panel::new_terminal(pid)
                             }
                         };
                         panels.push(panel);

@@ -17,6 +17,8 @@ pub enum PanelType {
     Markdown,
     /// Agent monitor panel -- GPU-rendered list of AI agent sessions.
     AgentMonitor,
+    /// Heartbeat output cap -- shows results from a heartbeat job.
+    Heartbeat,
 }
 
 impl std::fmt::Display for PanelType {
@@ -27,6 +29,7 @@ impl std::fmt::Display for PanelType {
             PanelType::Canvas => write!(f, "Canvas"),
             PanelType::Markdown => write!(f, "Markdown"),
             PanelType::AgentMonitor => write!(f, "Agent Monitor"),
+            PanelType::Heartbeat => write!(f, "Heartbeat"),
         }
     }
 }
@@ -97,6 +100,20 @@ impl Panel {
             id,
             panel_type: PanelType::AgentMonitor,
             title: "Agent Monitor".into(),
+            file_path: None,
+            canvas_id: None,
+            frozen: false,
+            child_pid: None,
+        }
+    }
+
+    /// Create a new heartbeat output cap with the given ID and job name.
+    pub fn new_heartbeat(id: PanelId, job_name: String) -> Self {
+        let title = format!("HB: {}", job_name);
+        Self {
+            id,
+            panel_type: PanelType::Heartbeat,
+            title,
             file_path: None,
             canvas_id: None,
             frozen: false,

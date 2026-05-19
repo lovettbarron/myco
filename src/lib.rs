@@ -13,6 +13,7 @@ pub mod platform;
 pub mod renderer;
 pub mod settings;
 pub mod shortcuts;
+pub mod right_sidebar;
 pub mod sidebar;
 pub mod status_bar;
 pub mod terminal;

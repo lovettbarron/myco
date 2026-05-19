@@ -154,6 +154,22 @@ pub enum InputAction {
     ProjectSearchBackspace,
     /// Close project search (Escape).
     ProjectSearchClose,
+    /// Toggle right sidebar visibility (Cmd+Shift+B).
+    ToggleRightSidebar,
+    /// Scroll heartbeat output cap.
+    HeartbeatScroll { panel_id: PanelId, delta: f32 },
+    /// Click on heartbeat output cap body.
+    HeartbeatClick { panel_id: PanelId, x: f32, y: f32, is_right_click: bool },
+    /// Scroll the right sidebar job list.
+    RightSidebarScroll { delta: f32 },
+    /// Click on the right sidebar.
+    RightSidebarClick { x: f32, y: f32, is_right_click: bool },
+    /// Resize the right sidebar by dragging its left edge.
+    RightSidebarResizeDrag { delta_pixels: f32 },
+    /// Open heartbeat output cap for a specific job.
+    OpenHeartbeatOutput { job_name: String },
+    /// Trigger immediate run of a heartbeat job.
+    HeartbeatRunNow { job_name: String },
     /// Quit the application (Cmd+Q).
     Quit,
 }
@@ -180,6 +196,7 @@ pub fn action_from_id(action_id: &str, panel_id: PanelId) -> Option<InputAction>
         "font_size_down" => Some(InputAction::TerminalFontSizeChange { panel_id, delta: -1.0 }),
         "toggle_fullscreen" => Some(InputAction::PanelToggleFullscreen { panel_id }),
         "open_agent_monitor" => Some(InputAction::OpenAgentMonitor),
+        "toggle_right_sidebar" => Some(InputAction::ToggleRightSidebar),
         "project_search" => Some(InputAction::ProjectSearchToggle),
         "quit" => Some(InputAction::Quit),
         _ => None,

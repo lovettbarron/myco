@@ -83,6 +83,8 @@ pub enum CapType {
     /// Agent monitor cap.
     #[serde(rename = "agent_monitor")]
     AgentMonitor,
+    /// Heartbeat output cap.
+    Heartbeat,
 }
 
 impl ProjectConfig {
@@ -223,6 +225,11 @@ impl ProjectConfig {
             }
             PanelType::AgentMonitor => CapConfig {
                 cap_type: CapType::AgentMonitor,
+                file: None,
+                cwd: None,
+            },
+            PanelType::Heartbeat => CapConfig {
+                cap_type: CapType::Heartbeat,
                 file: None,
                 cwd: None,
             },
