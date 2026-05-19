@@ -19,5 +19,6 @@ pub mod terminal;
 pub mod theme;
 pub mod monitor;
 pub mod toast;
+pub mod heartbeat;
 pub mod watcher;
 pub mod window;
