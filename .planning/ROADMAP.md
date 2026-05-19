@@ -20,7 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 6: AI Monitoring and Ship** - Process monitoring, intervention toasts, and v1 distribution readiness
 - [x] **Phase 7: Testing Infrastructure** - Headless GPU snapshots, terminal integration tests, IPC contract tests, property-based fuzzing, and criterion benchmarks (completed 2026-05-17)
 - [ ] **Phase 8: Agent Monitor Cap** - Dedicated GPU-rendered panel showing running AI agent sessions with status, token usage, running time, and intervention history
-- [ ] **Phase 10: Agentic Heartbeat Cap** - Periodic LLM-driven project health monitoring via Ollama/API — ambient intelligence that runs heartbeat jobs against the codebase and surfaces findings
+- [x] **Phase 10: Agentic Heartbeat Cap** - Periodic LLM-driven project health monitoring via Ollama/API — ambient intelligence that runs heartbeat jobs against the codebase and surfaces findings (completed 2026-05-19)
 - [ ] **Phase 9: Grid Layout Refactor** - Replace CSS Grid 2-level model with Warp-style recursive N-ary split tree using taffy Flexbox, with minimum panel sizes and smart split direction
 
 ## Phase Details
@@ -245,7 +245,7 @@ Plans:
 
 **Wave 3** *(integration + polish, depends on Wave 2)*
 - [x] 10-04-PLAN.md -- App.rs wiring and stats bar (scheduler lifecycle, HeartbeatEvent handling, rendering dispatch for sidebar + caps, InputAction routing, grid layout right sidebar deduction, file watcher job reload, toast notifications, stats bar heartbeat indicator with pulsing dot)
-- [ ] 10-05-PLAN.md -- Polish and verification (job toggle persist, README.md generation, Ollama auto-detect, PanelType::Heartbeat config serialization, human verification checkpoint)
+- [x] 10-05-PLAN.md -- Polish and verification (job toggle persist, README.md generation, Ollama auto-detect, PanelType::Heartbeat config serialization, human verification checkpoint)
 
 ## Progress
 
@@ -266,4 +266,4 @@ Note: Phase 10 (Agentic Heartbeat) depends on Phase 6+8 patterns. Research compl
 | 7. Testing Infrastructure | 3/3 | Complete | 2026-05-17 |
 | 8. Agent Monitor Cap | 3/3 | Complete | 2026-05-18 |
 | 9. Grid Layout Refactor | 3/3 | Complete | 2026-05-18 |
-| 10. Agentic Heartbeat Cap | 4/5 | In Progress|  |
+| 10. Agentic Heartbeat Cap | 5/5 | Complete   | 2026-05-19 |
